@@ -1,0 +1,202 @@
+import { bytesToUInt, bytesToUInt16 } from '../utils.js'
+
+const stringFixups  = [ 'TDEP', 'TSTR', 'TMET' ]
+const intPairFixups = [ 'EXID', 'EXNM' ]
+const intFixups     = [ 'MTSZ', 'ROOT', 'ONAM' ]
+const bytesFixups   = [ 'RVTB', 'RSTT', 'ROFS', 'RPID', 'RHND', 'RNEX', 'REXT', 'NSPC' ]
+const allFixups     = [ ...stringFixups, ...intPairFixups, ...intFixups, ...bytesFixups ]
+
+class Fixup {
+    constructor(type, size, header_size, item_count, data) {
+        this.type = type                   // Fixup type
+        this.encoded = this.isEncoded()    // Is encoded ?
+        this.size = size                   // Size of header + data
+        this.header_size = header_size     // Size of header
+        this.item_count = item_count       // Number of items
+        this.rawData = data                // Header + data
+        this.data = this.extractData(data) // Decoded data
+    }
+
+    isEncoded() {
+        return this.type.startsWith('R') && this.type != 'ROOT'
+    }
+
+    // Read fixup content from a BufferView
+    static fromBuffer(reader) {
+        // Get fixup type
+        const typeBytes  = reader.readBytes(4)
+        const type = String.fromCharCode(...typeBytes)
+
+        if (!allFixups.includes(type)) return null
+
+        // Get fixup info
+        const itemCount  = reader.readUInt()
+        const fixupSize  = reader.readUInt()
+        const headerSize = reader.readUInt()
+
+        // Get data from beginning of header to end of fixup
+        const data = reader.readBytes(fixupSize, reader.offset - 16) 
+
+        return new Fixup(type, fixupSize, headerSize, itemCount, data)
+    }
+
+    // Extract data from fixup
+    extractData() {
+        const fixupData = this.rawData.slice(this.header_size)
+        let data = []
+
+        if (this.encoded) {
+            data = decodeRVTB(fixupData, this.item_count)
+        }
+        else if (stringFixups.includes(this.type)) {
+            // Strings
+            let str = ''
+            for (let i = 0; i < fixupData.length && data.length < this.item_count; i++) {
+                const char = fixupData[i]
+
+                if (char == 0) {
+                    data.push(str)
+                    str = ''
+                    if (fixupData[i + 1] == 0) i++ // Skip double null bytes
+                }
+                else str += String.fromCharCode(char)
+            }
+        }
+        else if (intFixups.includes(this.type)) {
+            // Int32
+            for (let i = 0; i < this.item_count; i++) {
+                const int = bytesToUInt(fixupData, i * 4)
+                data.push(int)
+            }
+        }
+        else if (intPairFixups.includes(this.type)) {
+            // Int16 pairs
+            for (let i = 0; i < this.item_count; i++) {
+                const pair = [ bytesToUInt16(fixupData, i * 8), bytesToUInt16(fixupData, i * 8 + 4) ]
+                data.push(pair)
+            }
+        }
+        else {
+            data = fixupData.slice()
+        }
+
+        return data
+    }
+
+    // Get the object corresponding to an offset
+    getCorrespondingObject(offset, objects) {
+        const object = objects.find(e => offset >= e.offset && offset < e.offset + e.size)
+
+        if (object == null) {
+            console.log('No object found for offset', offset, this.type, this.data.indexOf(offset))
+            return { object: null, offset: NaN }
+        }
+
+        return {
+            object,
+            offset: offset - object.offset // relative offset
+        }
+    }
+
+    toNodeTree(objects) {
+        return {
+            text: `${this.type} (${this.item_count})`,
+            type: 'fixup',
+            fixup: this.type,
+            children: this.data.map((e, i) => {
+                let text = i + ': '
+
+                if (this.encoded || this.type == 'ONAM') {
+                    const object = this.getCorrespondingObject(e, objects)
+                    if (object.object == null) text += '<ERROR>'
+                    else {
+                        text += `${object.object.getName()}`
+                        if (object.offset > 0) text += ` [+ 0x${object.offset.toString(16).toUpperCase()}]`
+                    }
+                }
+                else text += e
+
+                return { 
+                    text, 
+                    type: 'offset', 
+                    fixup: this.type,
+                    offset: e 
+                }
+            })
+        }
+    }
+
+    save(writer) {
+        writer.setChars(this.type)
+        writer.setInt(this.item_count)
+        writer.setInt(this.size)
+        writer.setInt(this.header_size)
+        writer.setBytes(this.rawData.slice(16))
+    }
+
+    toString() {
+        return {
+            ...this,
+            rawData: this.rawData.length,
+        }
+    }
+}
+
+function decodeRVTB(bytes, count) {
+    const list = []
+    let currentInt = 0
+    let currentShift = 0
+
+    const halfBytes = Array.from(bytes).map(e => [e & 0xF, (e >> 4) & 0xF]).flat()
+
+    for (let i = 0; i < halfBytes.length; i++) {
+        const byte = halfBytes[i]
+        const stopReading = !(byte & 0b1000)
+
+        currentInt |= (byte & 0b0111) << currentShift
+        currentShift += 3
+
+        if (stopReading) {
+            const lastInt = list[list.length - 1] ?? 0
+            list.push(lastInt + currentInt * 4)
+
+            if (list.length == count) break
+
+            currentInt = 0
+            currentShift = 0
+        }
+    }
+
+    return list
+}
+
+function encodeRVTB(data) {
+    const bytes = []
+
+    data = data.sort((a, b) => a - b)
+
+    for (let i = 0; i < data.length; i++) {
+        const lastInt = data[i - 1] ?? 0
+        let currentInt = (data[i] - lastInt) / 4
+
+        do {
+            let byte = currentInt & 0b0111
+            currentInt = currentInt >> 3
+
+            if (currentInt != 0) byte |= 0b1000 // Continue reading ?
+            bytes.push(byte)
+        } while (currentInt > 0)
+    }
+
+    while (bytes.length % 8 != 0) bytes.push(0)
+
+    const final = []
+    for (let i = 0; i < bytes.length; i += 2) {
+        final.push( bytes[i] | (bytes[i + 1] << 4) )
+    }
+
+    return final
+}
+
+export default Fixup
+export { decodeRVTB, encodeRVTB }

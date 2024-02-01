@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>The Apprentice</title>
+</head>
+<body>
+    <div id="main">
+        <!-- Left Area -->
+        <div id="left-area">
+            <!-- Back to .pak button -->
+            <div id="back-pak">← Back to .pak</div>
+
+            <!-- Import button -->
+            <div id="pak-actions">
+                <button class="tree-preview-btn" id="pak-import">Import</button>
+            </div>
+
+            <div id="tree-view">
+                <!-- Tree View -->
+                <div class="tree"></div>
+
+                <!-- Search Bar -->
+                <div id="search-bar">
+                    <input type="text" id="search" placeholder="Search for objects..." />
+                    <label for="case-sensitive">Case sensitive</label>
+                    <input type="checkbox" id="case-sensitive" />
+                    <label for="case-sensitive">Auto Refresh</label>
+                    <input type="checkbox" id="auto-refresh" checked />
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right Area -->
+        <div id="right-area">
+            <!-- Level Selector -->
+            <div id="level-selector">
+                <div>
+                    <select id="level-select"></select>
+                    <button id="launch-game">Launch Level</button>
+                </div>
+                <div>
+                    <span>Use current .pak</span>
+                    <input type="checkbox" id="use-current-pak" checked />
+                </div>
+            </div>
+
+            <!-- Hex viewer -->
+            <div id="data-view">
+                <div class="section-title">Object data</div>
+                <div id="data-table-ctn">
+                    <table id="data-table"></table>
+                </div>
+            </div>
+
+            <!-- Data Types -->
+            <div id="data-types">
+                <div class="section-title">Potential type casts</div>
+                <table id="data-types-table">
+                    <tr>
+                        <th>Type</th>
+                        <th>Value</th>
+                    </tr>
+                </table>
+                <div id="apply-all">
+                    <label for="apply-all-checkbox">Apply to all search results?</label>
+                    <input type="checkbox" id="apply-all-checkbox" />
+                </div>
+            </div>
+            
+            <!-- Struct Viewer -->
+            <div id="data-struct">
+                <div class="section-title">Object structure</div>
+                <div>
+                <pre><code id="data" class="language-json"></code></pre>
+            </div>
+            </div>
+
+            <!-- Tree Preview -->
+            <div id="tree-preview-ctn">
+                <div id="tree-preview-buttons">
+                    <div id="tree-preview-buttons-bottom">
+                        <button class="tree-preview-btn" id="igz-clone">Clone</button>
+                        <button class="tree-preview-btn" id="igz-delete">Delete</button>
+                        <button class="tree-preview-btn" id="igz-replace">Replace</button>
+                        <button class="tree-preview-btn" id="igz-extract">Extract</button>
+                    </div>
+                    <button class="tree-preview-btn" id="igz-open" style="height: 30px;">Open</button>
+                </div>
+                <div class="tree-preview"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

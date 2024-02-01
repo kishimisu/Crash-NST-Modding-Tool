@@ -1,0 +1,6 @@
+.webpack
+.env
+node_modules
+data
+src_local
+out

@@ -1,0 +1,314 @@
+@font-face { font-family: Fira Code; src: url('../fonts/FiraCode-VariableFont_wght.ttf'); }
+@font-face { font-family: Chivo; src: url('../fonts/ChivoMono-VariableFont_wght.ttf'); }
+
+html, body, #main {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+}
+
+body {
+  color: #fefefe;
+  background: #222;
+  font-size: .75rem;
+  font-family: Chivo;
+}
+
+#main {
+  display: flex;
+}
+
+/* Left area */
+
+#back-pak {
+  white-space: nowrap;
+  width: min-content;
+  margin: 5px;
+  padding: 4px 20px;
+  cursor: pointer;
+  font-size: .85rem;
+  background-color: #424242;
+  display: none;
+}
+
+#left-area {
+  display: flex;
+  flex-direction: column;
+  width: 50%;
+  height: 100%;
+}
+
+#tree-view {
+  display: flex;
+  flex-grow: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+#tree-selector {
+  display: flex;
+}
+
+.tree-button {
+  width: 50%;
+}
+
+.tree {
+  flex-grow: 1;
+}
+
+/* Search Bar */
+
+#search-bar {
+  position: sticky;
+  display: flex;
+  width: 100%;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  padding: 5px;
+  background: #191919;
+  border-top: 1px solid white;
+  box-sizing: border-box;
+}
+
+#search-bar label {
+  white-space: nowrap;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-inline: 10px;
+}
+
+#search-bar input:nth-child(1) {
+  width: 100%;
+  border: none;
+  background: #434343;
+  color: #fefefe;
+  padding-inline-start: 5px;
+
+  &::placeholder {
+    color: #d0d0d0;
+  }
+}
+
+#pak-actions {
+  display: flex; 
+  gap: 5px; 
+  margin: 5px;
+}
+
+/* Level selector */
+
+#level-selector {
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+  position: absolute; 
+  right: 10px; 
+  gap: 5px;
+}
+
+#level-selector > div {
+  display: flex;
+  gap: 5px;
+}
+
+select {
+  cursor: pointer;
+  background: #1c1c1c;
+  color: #fefefe;
+}
+
+#launch-game {
+  background: #373737;
+  border: none;
+  color: #fefefe;
+  padding: 5px 25px;
+  cursor: pointer;
+  font-family: Chivo;
+}
+
+#launch-game:hover {
+  background: #555;
+}
+
+/* Data View */
+
+#right-area {
+  display: flex;
+  flex-direction: column;
+  width: 50%;
+  border-left: 1px solid white;
+  padding-inline: 10px;
+  margin-top: 10px;
+  gap: 10px;
+}
+
+.section-title {
+  font-size: .9rem;
+  text-decoration: underline;
+  text-decoration-thickness: 0.75px;
+  text-underline-offset: 2px;
+  padding-bottom: 5px;
+}
+
+#data-struct {
+  overflow: auto;
+}
+
+pre {
+  margin: 0;
+}
+
+code {
+  font-family: Fira Code;
+  font-weight: 400;
+}
+
+/* Hex Viewer */
+
+#data-view {
+  /* display: flex; */
+  display: none;
+  flex-direction: column;
+  max-height: 50%;
+}
+
+#data-table-ctn {
+  overflow-y: auto;
+}
+
+.hex-header {
+  color: rgb(189 255 174)
+}
+
+.hex-offset {
+  color: #888;
+}
+
+.hex-child {
+  color: rgb(111, 173, 255);
+}
+
+.hex-zero {
+  color: #666
+}
+
+table {
+  width: 100%;
+  font-family: monospace;
+  font-weight: bold;
+  font-size: 1rem;
+  text-align: center;
+  cursor: default;
+  background: #1c1c1c;
+
+  font-family: Chivo;
+  font-weight: 400;
+}
+
+tr:nth-child(even) {
+  background-color: #333;
+}
+
+tr:hover td {
+  background-color: #111;
+}
+
+td.selected {
+  /* background-color: #555!important; */
+  border: 1px solid white;
+  box-sizing: border-box;
+}
+
+td.hex-updated {
+  background-color: rgba(167 255 140 / 33%)!important;
+  box-sizing: border-box;
+}
+
+/* Data Type Viewer */
+
+#data-types {
+  width: fit-content;
+  min-width: 50%;
+  display: none;
+}
+
+#data-types td {
+  padding-inline: 10px;
+  line-break: anywhere;
+}
+
+.data-type-select {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+#apply-all {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 10px;
+  font-size: .9rem;
+  color: rgb(255, 240, 145);
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #333; /* Dark color for the thumb */
+  border-radius: 6px; /* Rounded corners for the thumb */
+}
+
+::-webkit-scrollbar-track {
+  background-color: #222; /* Dark color for the track */
+}
+
+/* Tree Preview */
+
+#tree-preview-ctn {
+  display: none;
+  height: 60%;
+}
+
+.tree-preview {
+  height: 100%;
+  overflow: auto;
+}
+
+#tree-preview-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+#tree-preview-buttons-bottom {
+  display: flex;
+  gap: 4px;
+}
+
+.tree-preview-btn {
+  width: 100%;
+  background: #191919;
+  border: none;
+  color: #fefefe;
+  padding: 5px;
+  cursor: pointer;
+  font-family: Chivo;
+}
+
+.tree-preview-btn:hover {
+  background: #333;
+}
+
+.tree-preview-btn:disabled {
+  background: #333;
+  color: #888;
+  cursor: default;
+}

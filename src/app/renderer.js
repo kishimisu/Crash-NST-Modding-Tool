@@ -435,7 +435,8 @@ function updateIGZWithinPAK()
     console.log('Saved IGZ within PAK', igzFile.path)
 }
 
-async function importFromPAK() {
+// Import files to the current pak
+async function importToPAK() {
     // Select a file
     const path = await ipcRenderer.invoke('open-file')
     if (path == null) return
@@ -594,7 +595,7 @@ window.onload = async () =>
     })
 
     // "Import" button
-    elm('#pak-import').addEventListener('click', importFromPAK)
+    elm('#pak-import').addEventListener('click', importToPAK)
 
     // "Clone IGZ" button
     elm('#igz-clone').addEventListener('click', async () => {
@@ -688,9 +689,7 @@ ipcRenderer.on('init-import-modal', (event, props) => init_file_import_modal(Mai
  */
 ipcRenderer.on('menu-open'   , (_, props) => loadFile(props))
 ipcRenderer.on('menu-reload' , () => window.location.reload())
-ipcRenderer.on('menu-import' , (_, props) => importFromPAK(props))
+ipcRenderer.on('menu-import' , (_, props) => importToPAK(props))
 ipcRenderer.on('menu-save'   , (_, props) => saveFile(props))
 ipcRenderer.on('menu-save-as', (_, props) => saveFile(props))
 ipcRenderer.on('menu-revert' , (_, props) => revertPakToOriginal(props))
-ipcRenderer.on('menu-readme' , (_, props) => saveFile(props))
-ipcRenderer.on('menu-github' , (_, props) => saveFile(props))

@@ -1,4 +1,4 @@
-import igObject from "../../pak/igObject"
+import igObject from "../../igz/igObject"
 import editSVG from '../../../assets/images/edit.svg'
 
 function resetDataViewTable(display = 'none') {

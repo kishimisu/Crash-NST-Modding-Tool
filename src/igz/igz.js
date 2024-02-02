@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'fs'
 import { BufferView } from '../utils.js'
 import Fixup from './fixup.js'
-import igObject from '../pak/igObject.js'
+import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 
 class IGZ {

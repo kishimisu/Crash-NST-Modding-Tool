@@ -78,7 +78,7 @@ class Pak {
             }
         }
 
-        if (!this.files.every((e, i) => i == 0 || e.id > this.files[i-1].id)) throw new Error('Files are not sorted by ID')
+        if (!this.files.every((e, i) => i == 0 || e.id >= this.files[i-1].id)) throw new Error('Files are not sorted by ID')
         if (this.files.some(e => e.id != e.computeID())) throw new Error('File ID mismatch')
     }
 

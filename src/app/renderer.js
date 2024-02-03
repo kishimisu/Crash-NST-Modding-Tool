@@ -110,6 +110,7 @@ class Main {
         const expandedState = tree.available().map(e => e.expanded())
         const selectedNode = tree.lastSelectedNode()?.fileIndex
 
+        tree.load([])
         tree.load(data)
         this.colorizeMainTree()
         this.updateTitle()
@@ -129,6 +130,8 @@ class Main {
                     e.itree.ref.style.color = '#ffaf36'
                 else if (!pak.files[e.fileIndex].original)
                     e.itree.ref.style.color = '#21ff78'
+                else
+                    e.itree.ref.style.color = ''
             }
             // IGZ object node
             else if (e.type === 'object') {
@@ -398,8 +401,7 @@ async function savePAK(filePath)
     }
     
     localStorage.setItem('last_file', filePath)
-    Main.setAllNodesToUpdated()
-    Main.updateTitle()
+    Main.reloadTree(pak.toNodeTree())
 
     console.log('Saved ' + filePath)
 }
@@ -460,17 +462,21 @@ async function importToPAK() {
     selection.forEach(async (e) => {
         const file = importPak.files[e]
         file.updated = true
+        file.original = false
         pak.files.push(file)
         pak.updated = true
 
         console.log('Imported', file.path)
     })
 
+    // Rebuild PAK tree
     Main.reloadTree(pak.toNodeTree())
 
+    // Set focus on the first imported file in the tree view
     const firstImport = tree.available().find(e => e.fileIndex === pak.files.length - selection.length)
     firstImport.expandParents()
     firstImport.select()
+    firstImport.focus()
 }
 
 /**

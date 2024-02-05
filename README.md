@@ -62,7 +62,7 @@ The potential type casts show you what the value might be corresponding to as in
 
 
 ## Run the project
-You can either [download the executable](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases/tag/beta), or build the project yourself using `yarn`:
+You can either [download the latest executable](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases), or build the project yourself using `yarn`:
 
 ### Generate platform-specific distributable
 ```

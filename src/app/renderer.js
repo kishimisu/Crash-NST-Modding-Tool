@@ -16,6 +16,7 @@ import levels from '../../assets/crash/levels.txt'
 import '../../assets/styles/style.css'
 import '../../assets/styles/inspire.css'
 import '../../assets/styles/hljs.css'
+import FileInfos from '../pak/fileInfos.js'
 
 hljs.registerLanguage('json', jsonLang)
 
@@ -444,25 +445,43 @@ function updateIGZWithinPAK()
 // Import files to the current pak
 async function importToPAK() {
     // Select a file
-    const path = await ipcRenderer.invoke('open-file')
-    if (path == null) return
+    const file_path = await ipcRenderer.invoke('open-file')
+    if (file_path == null) return
 
-    // On .igz import, add it to the current pak
-    if (path.endsWith('.igz')) {
-        throw new Error('Not implemented')
+    if (file_path.endsWith('.igz')) {
+        // On .igz import, add the file to the current pak under the current selected folder
+        const root = 'temporary/mack/data/win64/output/'
+        const lastNode = tree.lastSelectedNode()
+        const folderPath = lastNode?.type === 'folder' ? lastNode.path.replace(root, '') + '/' : ''
+
+        const data = readFileSync(file_path)
+        const name = file_path.split('\\').pop()
+        const path = folderPath + name
+
+        const file = new FileInfos({
+            path, full_path: root + path,
+            data, size: data.length,
+            updated: true,
+            original: false
+        })
+
+        pak.files.push(file)
+        pak.updated = true
     }
+    else {
+        // On .pak import, open file selection modal
+        const [selection, updatePKG] = await ipcRenderer.invoke('create-import-modal', { file_path })
 
-    // On .pak import, open file selection modal
-    const [selection, updatePKG] = await ipcRenderer.invoke('create-import-modal', { file_path: path })
+        if (selection == null || selection.length == 0) {
+            console.warn('Nothing imported')
+            return
+        }
+        
+        // Import files to the current pak
+        const import_pak = Pak.fromFile(file_path)
 
-    if (selection == null || selection.length == 0) {
-        console.warn('Nothing imported')
-        return
+        await pak.importFromPak(import_pak, selection, updatePKG)
     }
-    
-    // Import files to the current pak
-    const import_pak = Pak.fromFile(path)
-    await pak.importFromPak(import_pak, selection, updatePKG)
 
     // Rebuild PAK tree
     Main.reloadTree(pak.toNodeTree())

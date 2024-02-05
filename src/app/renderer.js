@@ -133,6 +133,10 @@ class Main {
                 else
                     e.itree.ref.style.color = ''
             }
+            // PAK folder node
+            else if (e.type === 'folder') {
+                e.itree.ref.childNodes[0].style.color = e.updated ? '#ffaf36' : ''
+            }
             // IGZ object node
             else if (e.type === 'object') {
                 if (igz.objects[e.objectIndex].updated)
@@ -153,7 +157,7 @@ class Main {
         const buffer = await pak.files[fileIndex].getUncompressedData()
 
         try {
-            igz = new IGZ(new Uint8Array(buffer), pak.files[fileIndex].path)
+            igz = new IGZ(buffer, pak.files[fileIndex].path)
         }
         catch (e) {
             treePreview.load([{ 
@@ -449,25 +453,16 @@ async function importToPAK() {
     }
 
     // On .pak import, open file selection modal
-    const selection = await ipcRenderer.invoke('create-import-modal', { file_path: path })
+    const [selection, updatePKG] = await ipcRenderer.invoke('create-import-modal', { file_path: path })
 
     if (selection == null || selection.length == 0) {
         console.warn('Nothing imported')
         return
     }
     
-    const importPak = Pak.fromFile(path)
-
-    // Add each selected file to the current pak
-    selection.forEach(async (e) => {
-        const file = importPak.files[e]
-        file.updated = true
-        file.original = false
-        pak.files.push(file)
-        pak.updated = true
-
-        console.log('Imported', file.path)
-    })
+    // Import files to the current pak
+    const import_pak = Pak.fromFile(path)
+    await pak.importFromPak(import_pak, selection, updatePKG)
 
     // Rebuild PAK tree
     Main.reloadTree(pak.toNodeTree())
@@ -496,7 +491,7 @@ function getOriginalPAKName() {
 
 // Revert a .pak file to its original content (saved when loading a PAK from the game folder)
 function revertPakToOriginal() {
-    const name = getOriginalPAKName()//pak.path.split('\\').pop()
+    const name = getOriginalPAKName()
     const savedPath = './data/originals/' + name
     const originalPath = nstPath + 'archives\\' + name
 
@@ -522,14 +517,14 @@ function launchGame() {
     
     localStorage.setItem('last_level', level)
 
-    // Disable button for 3 seconds
+    // Disable button for 4 seconds
     elm("#launch-game").disabled = true
-    setTimeout(() => elm("#launch-game").disabled = false, 3000)
+    setTimeout(() => elm("#launch-game").disabled = false, 4000)
 
     if (elm('#use-current-pak').checked) {
         // Replace pak in game folder with current pak
         const originalName = getOriginalPAKName()
-        console.log('Replaced pak in game folder with', pak.path)
+        console.log(`Replaced ${originalName} with ${pak.path}`)
         copyFileSync(pak.path, nstPath + 'archives\\' + originalName)
     }
 
@@ -622,7 +617,7 @@ window.onload = async () =>
         for (const file of pak.files.filter(e => !e.original)) {
             writeFileSync(`./data/tmp/${file.id}`, new Uint8Array(file.data))
         }
-        const newFileIndex = await ipcRenderer.invoke('create-import-modal', {
+        const [newFileIndex] = await ipcRenderer.invoke('create-import-modal', {
             files_data: pak.files.map(e => e.toJSON()),
             current_file_index: fileIndex
         })
@@ -699,3 +694,5 @@ ipcRenderer.on('menu-import' , (_, props) => importToPAK(props))
 ipcRenderer.on('menu-save'   , (_, props) => saveFile(props))
 ipcRenderer.on('menu-save-as', (_, props) => saveFile(props))
 ipcRenderer.on('menu-revert' , (_, props) => revertPakToOriginal(props))
+
+if (process.env.NODE_ENV === 'development') window.Main = Main

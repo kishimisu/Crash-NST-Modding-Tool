@@ -1,4 +1,4 @@
-import { bytesToUInt, bytesToUInt16 } from '../utils.js'
+import { bytesToUInt, bytesToUInt16, intToBytes } from '../utils.js'
 
 const stringFixups  = [ 'TDEP', 'TSTR', 'TMET' ]
 const intPairFixups = [ 'EXID', 'EXNM' ]
@@ -35,7 +35,7 @@ class Fixup {
         const headerSize = reader.readUInt()
 
         // Get data from beginning of header to end of fixup
-        const data = reader.readBytes(fixupSize, reader.offset - 16) 
+        const data = reader.readBytes(fixupSize, reader.offset - 16)
 
         return new Fixup(type, fixupSize, headerSize, itemCount, data)
     }
@@ -49,9 +49,11 @@ class Fixup {
             data = decodeRVTB(fixupData, this.item_count)
         }
         else if (stringFixups.includes(this.type)) {
+            const item_count = this.item_count * (this.type === 'TDEP' ? 2 : 1)
+
             // Strings
             let str = ''
-            for (let i = 0; i < fixupData.length && data.length < this.item_count; i++) {
+            for (let i = 0; i < fixupData.length && data.length < item_count; i++) {
                 const char = fixupData[i]
 
                 if (char == 0) {
@@ -60,6 +62,15 @@ class Fixup {
                     if (fixupData[i + 1] == 0) i++ // Skip double null bytes
                 }
                 else str += String.fromCharCode(char)
+            }
+
+            if (this.type === 'TDEP') {
+                // Group by pairs of two
+                data = data.reduce((acc, e, i) => {
+                    if (i % 2 == 0) acc.push([e])
+                    else acc[acc.length - 1].push(e)
+                    return acc
+                }, [])
             }
         }
         else if (intFixups.includes(this.type)) {
@@ -81,6 +92,38 @@ class Fixup {
         }
 
         return data
+    }
+
+    updateData(data) {
+        let oldData = this.data
+        this.data = data ?? this.data
+
+        let encoded = []
+        
+        if (this.type === 'TSTR') {
+            for (let i = 0; i < this.data.length; i++) {
+                const str = this.data[i] + '\0' + (this.data[i].length % 2 == 0 ? '\0' : '')
+                encoded = encoded.concat([...str].map(e => e.charCodeAt(0)))
+            }
+        }
+        else if (this.isEncoded()) {
+            encoded = encodeRVTB(this.data)
+        }
+        else if (intFixups.includes(this.type)) {
+            encoded = this.data.map(e => intToBytes(e)).flat()
+        }
+        else {
+            throw new Error ('Update not implemented: ' + this.type)
+        }
+
+        if (['RVTB', 'ONAM', 'ROFS'].includes(this.type))
+            console.log('Updating', this.type, 'from', oldData, 'to', this.data)
+        else
+            console.log('Updating', this.type, ' size from', oldData.length, 'to', this.data.length)
+
+        this.rawData = this.rawData.slice(0, this.header_size).concat(encoded)
+        this.size = this.rawData.length
+        this.item_count = this.data.length
     }
 
     // Get the object corresponding to an offset

@@ -53,6 +53,51 @@ class igObject {
         return list
     }
 
+    // Update object list data for igObjectList and igNameList
+    updateList(list) {
+        if (!this.isListType()) throw new Error('Invalid object list type: ' + this.type)
+        
+        const count = list.length
+        const data_size = count * this.element_size
+
+        this.view = new BufferView(this.data)
+        this.size = igListHeaderSize + data_size
+
+        this.view.setInt(count, 16)
+        this.view.setInt(count, 20)
+        this.view.setInt(data_size, 24)
+        // this.view.setInt(offset, 32) // updated on save
+
+        for (let i = 0; i < count; i++) {
+            this.view.setInt(list[i], igListHeaderSize + i * this.element_size)
+        }
+    }
+
+    // Update object list data for igStreamingChunkInfo
+    updatePKG(files) {
+        if (this.type !== 'igStreamingChunkInfo') throw new Error('Invalid object type: ' + this.type)
+
+        const new_data = new Uint8Array(64 + files.length * 16)
+
+        new_data.set(this.data.slice(0, 64))
+
+        let view = new BufferView(new_data)
+        view.setInt(files.length, 40)
+        view.setInt(files.length * 16, 48)
+
+        view.seek(64)
+        for (let [id, id2] of files) {
+            view.setInt(id)
+            view.setInt(0)
+            view.setInt(id2)
+            view.setInt(0)
+        }
+
+        this.data = new_data
+        this.size = new_data.length
+        this.view = new BufferView(this.data)
+    }
+
     getName() {
         let str = this.type
         if (this.deleted) str = '<Deleted> ' + str
@@ -66,7 +111,7 @@ class igObject {
         return this.getName()
     }
 
-    save(writer) {
+    save(writer, chunk0_offset) {
         if (this.data.length != this.size) throw new Error('Data size mismatch: ' + this.data.length + ' != ' + this.size)
 
         if (this.deleted) {
@@ -74,8 +119,14 @@ class igObject {
             return
         }
 
+        if (this.isListType()) {
+            this.offset = writer.offset - chunk0_offset
+            const new_offset   = this.offset + igListHeaderSize
+            this.view.setInt(new_offset, 32)
+        }
+
         // Update references count
-        this.view.setInt(this.references.length, 8)
+        // this.view.setInt(this.references.length, 8)
 
         for (let k = 0; k < this.size; k += 4) {
             const child = this.children.find(e => e.offset == k)

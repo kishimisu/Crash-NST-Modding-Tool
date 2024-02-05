@@ -16,7 +16,7 @@ This is a very early demo, bugs may appear. Feedback and contributions are welco
 
 - **Revert to Original**: Revert the original archive (in the game folder) to its default state. Does not reset the content of the current archive being explored.
 
-- **Import**: Import either a single .igz file or a selection of files from another PAK archive into the current one.
+- **Import**: Import either a single .igz file or a selection of files from another PAK archive into the current one. If `Update package file` is selected, all dependencies will also be imported recursively, and the _pkg.igz file will be rebuilt.
 
 *When clicking on a .igz file within the archive:*
 
@@ -44,7 +44,7 @@ This is a very early demo, bugs may appear. Feedback and contributions are welco
 
 You have the possibility to edit any object's data in the IGZ explorer by clicking on a cell in the object's data view.
 
-#### Calculations helpers
+#### Relative calculations
 
 You can do relative computations when editing a value. For example writing `* 2` will multiply the current value by two.
 It also works with `+ 2`, `/ 2` but it needs to be `-= 2` for subtraction to prevent confusing with the negative number `-2`.

@@ -181,9 +181,9 @@ function createImportModal(event, props) {
     })
 
     return new Promise((resolve, reject) => {
-        ipcMain.once('on-file-select', (event, fileIndex) => {
+        ipcMain.once('on-file-select', (event, fileIndex, updatePKG) => {
             child.destroy()
-            resolve(fileIndex)
+            resolve([fileIndex, updatePKG])
         })
 
         child.on('close', () => {

@@ -1,6 +1,7 @@
 import { writeFileSync, readFileSync } from 'fs'
 import { BufferView, formatSize } from "../utils"
 import FileInfos from './fileInfos'
+import IGZ from '../igz/igz'
 
 const PAK_VERSION   = 11
 const PAK_SIGNATURE = 0x1A414749
@@ -238,6 +239,118 @@ class Pak {
         return -1
     }
 
+    /**
+     * Find the archive's package file (ArchiveName_pkg.igz)
+     * @returns {FileInfos} The package file
+     */
+    getPackageFile() {
+        return this.files.find(e => e.path.includes('_pkg.igz'))
+    }
+    
+    /**
+     * Add new file references to the package file (ArchiveName_pkg.igz)
+     * @param {string[] | null} new_files The paths to add. If null, they will be searched in the current files
+     */
+    async updatePKG(new_files) {
+        // Get package file data
+        const pkg = this.getPackageFile()
+        const data = await pkg.getUncompressedData()
+
+        // Create IGZ
+        const igz = new IGZ(data, pkg.path)
+
+        // List current files
+        const pkg_files = igz.fixups.TSTR.data.filter(e => e.includes('.'))
+        
+        // Add new files
+        for (const path of new_files ?? this.files.map(e => e.path)) {
+            if (path.includes('_pkg') || pkg_files.includes(path.toLowerCase()))
+                continue
+
+            console.log('Adding to PKG', path)
+            pkg_files.push(path.toLowerCase())
+        }
+
+        // Update package file
+        const new_data = igz.updatePKG(pkg_files)
+        pkg.data = new_data
+        pkg.size = new_data.length
+        pkg.original = false
+        pkg.updated = true
+    }
+
+    /**
+     * Import a selection of files from another .pak into this one
+     * 
+     * @param {Pak} import_pak The .pak to import from
+     * @param {int[]} files The indexes of the files to import
+     * @param {boolean} update_pkg Whether to update the package file (if true, will recursively add all dependencies to the current .pak)
+     */
+    async importFromPak(import_pak, file_ids, update_pkg = true) {
+        // Imported package files
+        const import_pkg       = import_pak.getPackageFile()
+        const import_pkg_igz   = new IGZ(await import_pkg.getUncompressedData(), import_pkg.path)
+        const import_pkg_files = import_pkg_igz.fixups.TSTR.data.slice()
+
+        // Current package files
+        const current_pkg      = this.getPackageFile()
+        const current_pkg_igz  = new IGZ(await current_pkg.getUncompressedData(), current_pkg.path)
+        const current_pkg_files = current_pkg_igz.fixups.TSTR.data.slice()
+
+        // Lambda helpers
+        const isInCurrentPAK = (f) => this.files.find(e => e.path.toLowerCase().includes(f.toLowerCase())) != null
+        const isInImportPAK  = (f) => import_pak.files.find(e => e.path.toLowerCase().includes(f.toLowerCase())) != null
+        const isInCurrentPKG = (f) => current_pkg_files.find(e => e.toLowerCase().includes(f.toLowerCase())) != null
+        const isInImportPKG  = (f) => import_pkg_files.find(e => e.toLowerCase().includes(f.toLowerCase())) != null
+
+        let pak_deps = []
+        let pkg_deps = []
+
+        const addFileAndDependencies = async (file) => {
+            // Add file to the current archive
+            file.updated = true
+            file.original = false
+            this.files.push(file)
+            if (!update_pkg || !file.path.endsWith('.igz')) return
+
+            // Get all IGZ dependencies
+            const igz  = new IGZ(await file.getUncompressedData(), file.path)
+            const deps = igz.getDependencies(import_pak)
+
+            // Add new dependencies
+            const add_to_pak = deps.filter(e => !isInCurrentPAK(e) && isInImportPAK(e) && !pak_deps.includes(e))
+            const add_to_pkg = deps.filter(e => !isInCurrentPKG(e) && isInImportPKG(e) && !pkg_deps.includes(e))
+            pak_deps.push(...add_to_pak)
+            pkg_deps.push(...add_to_pkg)
+        }
+
+        // Add each selected file to the current pak
+        for (const id of file_ids) {
+            const file = import_pak.files[id]
+            pkg_deps.push(file.path)
+            await addFileAndDependencies(file)
+        }
+
+        if (update_pkg) {
+            // Iteratively add all dependencies
+            while (pak_deps.length > 0) {
+                const file_path = pak_deps.pop()
+                const file = import_pak.files.find(e => e.path == file_path)
+                if (file == null) throw new Error('File not found: ' + file_path)
+                await addFileAndDependencies(file)
+            }
+
+            // Sort dependencies by order of appearance in the original package file
+            pkg_deps = pkg_deps.sort((a, b) => import_pkg_files.indexOf(a.toLowerCase()) - import_pkg_files.indexOf(b.toLowerCase()))
+
+            // Update package file
+            this.updatePKG(pkg_deps)
+        }
+
+        console.log('Imported', pkg_deps.length, 'files')
+        this.updated = true
+    }
+
     async cloneFile(index) {
         const file = this.files[index]
         
@@ -281,41 +394,52 @@ class Pak {
         const total_size = this.files.reduce((acc, e) => acc + e.size, 0)
         const tree = []
 
+        // For each file in the archive
         for (let i = 0; i < this.files.length; i++) {
-            let folders = this.files[i].full_path.split('/')
+            let folders = this.files[i].full_path.split('/') // List of folders from the path
             let fileName = folders.pop()
             
             let parent = null
             let folderPath = folders[0]
+            let parentFolders = []
+
+            // Create and update parent folders in the tree
             for (let j = 0; j < folders.length; j++) {
                 let node = tree.find(e => e.path == folderPath)
-
+                
                 if (node == null) {
+                    // Create an empty folder if it doesn't exist
                     node = { 
                         text: folders[j] + '/', 
                         path: folderPath,
                         type: 'folder',
                         file_count: 0,
                         size: 0,
-                        children: []
+                        children: [],
+                        updated: false
                     }
                     tree.push(node)
                 }
 
                 if (parent != null) {
+                    // Add the folder to its parent if it's not already there
                     if (!parent.children.includes(node)) {
                         parent.children.push(node)
                     }
-
+                    
+                    node.parent = parent
                     parent.file_count++
                     parent.size += this.files[i].size
                 }
 
+                parentFolders.push(node)
 
+                // Go to the next (child) folder
                 folderPath += '/' + folders[j+1]
                 parent = node
             }
 
+            // Add the file as a child of the last folder
             parent.children.push({
                 text: fileName + (this.files[i].updated ? '*' : ''),
                 type: 'file',
@@ -323,8 +447,10 @@ class Pak {
             })
             parent.file_count++
             parent.size += this.files[i].size
+            parentFolders.forEach(e => e.updated = e.updated || this.files[i].updated)
         }
 
+        // Update sizes and sort children
         tree.forEach(e => {
             e.size = formatSize(e.size) + ` (${(e.size / total_size * 100).toFixed(2)}%)`
             e.children = e.children.sort((a, b) => a.text.localeCompare(b.text))
@@ -332,6 +458,7 @@ class Pak {
 
         let root = tree[0]
 
+        // Concatenate root single child folders
         while (root.children.length == 1) {
             root.children[0].text = root.text + root.children[0].text
             root = root.children[0]

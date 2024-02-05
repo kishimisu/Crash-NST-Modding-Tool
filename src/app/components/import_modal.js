@@ -44,7 +44,7 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
     // Update import button text (selected files count)
     const updateImportButton = () => {
         const selected_count = tree.selected().filter(e => e.type === 'file').length
-        importButton.innerText = 'Import' + (selected_count > 0 ? `${selected_count} file${selected_count > 1 ? 's' : ''}` : '')
+        importButton.innerText = 'Import ' + (selected_count > 0 ? `${selected_count} file${selected_count > 1 ? 's' : ''}` : '')
         importButton.disabled = selected_count == 0
     }
     
@@ -65,10 +65,12 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
     }
     // Import files from external pak
     else {
+        elm("#update-pkg").parentNode.style.display = 'flex'
+
         importButton.addEventListener('click', () => {
             const selected = tree.selected()
             const files = selected.map(e => e.fileIndex).filter(e => e != null)
-            ipcRenderer.send('on-file-select', files)
+            ipcRenderer.send('on-file-select', files, elm("#update-pkg").checked)
         })
 
         tree.get(0).expand()

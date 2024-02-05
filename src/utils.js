@@ -53,8 +53,10 @@ class BufferView {
         }
     }
 
+    setLong  = (value, offset) => this.setBytes('setBigInt64', 8, value, offset)
     setInt   = (value, offset) => this.setValue('setInt32', 4, value, offset)
     setUInt  = (value, offset) => this.setValue('setUint32', 4, value, offset)
+    setInt16 = (value, offset) => this.setValue('setInt16', 2, value, offset)
     setFloat = (value, offset) => this.setValue('setFloat32', 4, value, offset)
     setChars = (value, offset) => this.setBytes([...value].map(e => e.charCodeAt(0)), offset)
     setByte  = (value, offset) => this.setValue('setUint8', 1, value, offset)

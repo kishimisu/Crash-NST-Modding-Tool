@@ -21,7 +21,7 @@ module.exports = [
     loader: 'svg-inline-loader'
   },
   {
-    test: /\.txt$/,
+    test: /\.(txt|json)$/,
     loader: 'raw-loader'
   }
 ];

@@ -94,8 +94,18 @@ body {
 
 #pak-actions {
   display: flex; 
+  align-items: center;
   gap: 5px; 
   margin: 5px;
+}
+
+#pak-actions div {
+  /* display: flex; */
+  display: none;
+  text-wrap: nowrap;
+  align-items: center;
+  margin: 0 5px;
+  gap: 10px;
 }
 
 /* Level selector */
@@ -131,6 +141,12 @@ select {
 
 #launch-game:hover {
   background: #555;
+}
+
+#launch-game:disabled {
+  background: #333;
+  color: #888;
+  cursor: default;
 }
 
 /* Data View */

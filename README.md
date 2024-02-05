@@ -90,7 +90,6 @@ yarn start
 
 ## TODO
 - Add possibility to change installed game path (currently defaults to `C:\Program Files (x86)\Steam\steamapps\common\Crash Bandicoot - N Sane Trilogy`)
-- Add file renaming
 - Texture & Audio preview
 - Automatically add new external dependencies
 - Add possibility to rebuild the _pkg.igz file

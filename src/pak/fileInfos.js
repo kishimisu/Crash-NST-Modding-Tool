@@ -22,6 +22,20 @@ class FileInfos {
         return this.compression != 0xFFFFFFFF
     }
 
+    /**
+     * Rename the file while keeping the same path
+     * @param {string} new_name New file name. Must contain the extension
+     */
+    rename(new_name) {
+        const path = this.path.slice(0, this.path.lastIndexOf('/') + 1)
+        const full_path = this.full_path.slice(0, this.full_path.lastIndexOf('/') + 1)
+        console.log(`Renamed ${this.path} to ${path + new_name}`)
+        this.path = path + new_name
+        this.full_path = full_path + new_name
+        this.updated = true
+        this.original = false
+    }
+
     async getUncompressedData() {
         let needs_caching = false
 

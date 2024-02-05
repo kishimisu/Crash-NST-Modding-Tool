@@ -543,7 +543,7 @@ window.onload = async () =>
     if (!window.process.argv.includes('main_window')) return
 
     // Create main tree
-    Main.createMainTree()
+    Main.createMainTree({ editable: true, editing: { add: false, edit: true, remove: false }})
     tree.on('node.click', onNodeClick)
 
     /// Search bar
@@ -597,6 +597,25 @@ window.onload = async () =>
 
     // "Import" button
     elm('#pak-import').addEventListener('click', importToPAK)
+
+    // "Rename IGZ" button
+    elm('#igz-rename').addEventListener('click', () => {
+        const node = tree.lastSelectedNode()
+
+        if (node.type == 'file') {
+            if (!node.editing()) node.toggleEditing()
+        }
+    })
+    // On IGZ file rename
+    tree.on('node.edited', (node, oldValue, newValue) => {
+        if (node.type === 'file') {
+            const file = pak.files[node.fileIndex]
+            file.rename(newValue)
+            pak.updated = true
+            Main.updateTitle()
+            Main.colorizeMainTree()
+        }
+    })
 
     // "Clone IGZ" button
     elm('#igz-clone').addEventListener('click', async () => {

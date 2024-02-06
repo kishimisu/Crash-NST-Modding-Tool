@@ -18,8 +18,7 @@ class Pak {
         this.files = files.map(e => new FileInfos(e))
         this.path = path
         this.updated = false
-
-        this.uncompressed = false
+        this.package_igz = null // Reference to the package file (ArchiveName_pkg.igz) as IGZ object
     }
 
     /** Construct from .pak file path
@@ -65,7 +64,13 @@ class Pak {
             const full_path = reader.readStr(names_offset + file_name_offset)
             const path = reader.readStr()
 
-            this.files.push(new FileInfos({ id, offset, ordinal, size, compression, full_path, path, data }))
+            const file = new FileInfos({ id, offset, ordinal, size, compression, full_path, path, data })
+
+            // Find package file
+            if (path.includes('_pkg.igz')) 
+                this.package_igz = IGZ.fromFileInfos(file)
+
+            this.files.push(file)
         }
 
         /// Read custom data ///
@@ -79,14 +84,22 @@ class Pak {
             }
         }
 
+        // Check if files are included in the package file
+        for (const file of this.files) {
+            file.include_in_pkg = this.package_igz.fixups.TSTR.data.includes(file.path.toLowerCase())
+        }
+
         if (!this.files.every((e, i) => i == 0 || e.id >= this.files[i-1].id)) throw new Error('Files are not sorted by ID')
         if (this.files.some(e => e.id != e.computeID())) throw new Error('File ID mismatch')
     }
 
-    async save(filePath, progressCallback) {
+    save(filePath, progressCallback) {
         const file_count = this.files.length
         const INFOS_START = HEADER_SIZE + file_count * 4
         const DATA_START  = HEADER_SIZE + file_count * 20
+
+        // Update package file
+        this.updatePackageFile()
 
         // Calculate file IDs
         this.files.forEach(e => e.computeID())
@@ -130,7 +143,7 @@ class Pak {
         for (let i = 0; i < file_count; i++) {
             const file = this.files[i]
             const ordinal = (i - 1) << 0x8
-            const file_data = await file.getUncompressedData()
+            const file_data = file.getUncompressedData()
 
             file.offset  = writer.offset
             file.ordinal = ordinal
@@ -238,45 +251,43 @@ class Pak {
     
         return -1
     }
-
-    /**
-     * Find the archive's package file (ArchiveName_pkg.igz)
-     * @returns {FileInfos} The package file
-     */
-    getPackageFile() {
-        return this.files.find(e => e.path.includes('_pkg.igz'))
-    }
     
     /**
-     * Add new file references to the package file (ArchiveName_pkg.igz)
-     * @param {string[] | null} new_files The paths to add. If null, they will be searched in the current files
+     * Update the package file, additionnally adding new files if specified
+     * @param {string[] | null} new_files The paths to add
      */
-    async updatePKG(new_files) {
-        // Get package file data
-        const pkg = this.getPackageFile()
-        const data = await pkg.getUncompressedData()
+    updatePackageFile(new_files) {
+        // Get current paths listed in the package file
+        const pkg_files = this.package_igz.fixups.TSTR.data.filter(e => e.includes('.'))
 
-        // Create IGZ
-        const igz = new IGZ(data, pkg.path)
+        // Update which files are included in the package file
+        for (const file of this.files) {
+            const path = file.path.toLowerCase()
+            const existsInPKG = pkg_files.includes(path)
 
-        // List current files
-        const pkg_files = igz.fixups.TSTR.data.filter(e => e.includes('.'))
+            if (file.include_in_pkg && !existsInPKG) {
+                pkg_files.push(path)
+            }
+            else if (!file.include_in_pkg && existsInPKG) {
+                pkg_files.splice(pkg_files.indexOf(path), 1)
+            }
+        }
         
         // Add new files
-        for (const path of new_files ?? this.files.map(e => e.path)) {
-            if (path.includes('_pkg') || pkg_files.includes(path.toLowerCase()))
+        for (const path of new_files ?? []) {
+            if (pkg_files.includes(path.toLowerCase()))
                 continue
 
-            console.log('Adding to PKG', path)
             pkg_files.push(path.toLowerCase())
         }
 
         // Update package file
-        const new_data = igz.updatePKG(pkg_files)
-        pkg.data = new_data
-        pkg.size = new_data.length
-        pkg.original = false
-        pkg.updated = true
+        const new_data = this.package_igz.updatePKG(pkg_files)
+        const package_file = this.files.find(e => e.path == this.package_igz.path)
+        package_file.data = new_data
+        package_file.size = new_data.length
+        package_file.original = false
+        package_file.updated = true
     }
 
     /**
@@ -284,79 +295,55 @@ class Pak {
      * 
      * @param {Pak} import_pak The .pak to import from
      * @param {int[]} files The indexes of the files to import
-     * @param {boolean} update_pkg Whether to update the package file (if true, will recursively add all dependencies to the current .pak)
+     * @param {boolean} import_dependencies Whether to recursively import all dependencies into the current .pak (and package file)
      */
-    async importFromPak(import_pak, file_ids, update_pkg = true) {
-        // Imported package files
-        const import_pkg       = import_pak.getPackageFile()
-        const import_pkg_igz   = new IGZ(await import_pkg.getUncompressedData(), import_pkg.path)
-        const import_pkg_files = import_pkg_igz.fixups.TSTR.data.slice()
-
-        // Current package files
-        const current_pkg      = this.getPackageFile()
-        const current_pkg_igz  = new IGZ(await current_pkg.getUncompressedData(), current_pkg.path)
-        const current_pkg_files = current_pkg_igz.fixups.TSTR.data.slice()
-
-        // Lambda helpers
-        const isInCurrentPAK = (f) => this.files.find(e => e.path.toLowerCase().includes(f.toLowerCase())) != null
-        const isInImportPAK  = (f) => import_pak.files.find(e => e.path.toLowerCase().includes(f.toLowerCase())) != null
-        const isInCurrentPKG = (f) => current_pkg_files.find(e => e.toLowerCase().includes(f.toLowerCase())) != null
-        const isInImportPKG  = (f) => import_pkg_files.find(e => e.toLowerCase().includes(f.toLowerCase())) != null
+    importFromPak(import_pak, file_ids, import_dependencies = true) {
 
         let pak_deps = []
         let pkg_deps = []
 
-        const addFileAndDependencies = async (file) => {
+        const addFileAndDependencies = (file) => {
             // Add file to the current archive
+            pkg_deps.push(file.path)
             file.updated = true
             file.original = false
             this.files.push(file)
-            if (!update_pkg || !file.path.endsWith('.igz')) return
+
+            if (!import_dependencies || !file.path.endsWith('.igz')) return
 
             // Get all IGZ dependencies
-            const igz  = new IGZ(await file.getUncompressedData(), file.path)
-            const deps = igz.getDependencies(import_pak)
+            const deps = IGZ.fromFileInfos(file).getDependencies(import_pak)
+
+            const isInCurrentPak = (dep) => this.files.some(e => e.path == dep) || pak_deps.includes(dep)
 
             // Add new dependencies
-            const add_to_pak = deps.filter(e => !isInCurrentPAK(e) && isInImportPAK(e) && !pak_deps.includes(e))
-            const add_to_pkg = deps.filter(e => !isInCurrentPKG(e) && isInImportPKG(e) && !pkg_deps.includes(e))
-            pak_deps.push(...add_to_pak)
-            pkg_deps.push(...add_to_pkg)
+            pak_deps.push(...deps.filter(e => !isInCurrentPak(e)))
         }
 
         // Add each selected file to the current pak
         for (const id of file_ids) {
             const file = import_pak.files[id]
-            pkg_deps.push(file.path)
-            await addFileAndDependencies(file)
+            addFileAndDependencies(file)
         }
 
-        if (update_pkg) {
-            // Iteratively add all dependencies
-            while (pak_deps.length > 0) {
-                const file_path = pak_deps.pop()
-                const file = import_pak.files.find(e => e.path == file_path)
-                if (file == null) throw new Error('File not found: ' + file_path)
-                await addFileAndDependencies(file)
-            }
-
-            // Sort dependencies by order of appearance in the original package file
-            pkg_deps = pkg_deps.sort((a, b) => import_pkg_files.indexOf(a.toLowerCase()) - import_pkg_files.indexOf(b.toLowerCase()))
-
-            // Update package file
-            this.updatePKG(pkg_deps)
+        // Iteratively add all dependencies
+        while (pak_deps.length > 0 && import_dependencies) {
+            const path = pak_deps.pop()
+            const file = import_pak.files.find(e => e.path == path)
+            if (file == null) throw new Error('File not found: ' + path)
+            addFileAndDependencies(file)
         }
 
         console.log('Imported', pkg_deps.length, 'files')
         this.updated = true
     }
 
-    async cloneFile(index) {
+    cloneFile(index) {
         const file = this.files[index]
         
         const updatePath = (str) => str.slice(0, str.lastIndexOf('.')) + '_Copy' + str.slice(str.lastIndexOf('.'))
 
-        const new_data = await file.getUncompressedData()
+        const new_data = file.getUncompressedData()
 
         const new_file = new FileInfos({ 
             ...this.files[index],

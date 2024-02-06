@@ -14,6 +14,7 @@ class FileInfos {
 
         this.data = data
 
+        this.include_in_pkg = true
         this.original = original
         this.updated = updated
     }
@@ -36,7 +37,7 @@ class FileInfos {
         this.original = false
     }
 
-    async getUncompressedData() {
+    getUncompressedData() {
         let needs_caching = false
 
         // If it's an original and compressed file
@@ -106,7 +107,7 @@ class FileInfos {
                 ]
                 
                 // Decompress chunk
-                const chunk = await decompress(lzma_data)
+                const chunk = decompress(lzma_data)
 
                 checkArraySize(chunk.length)
                 data.set(chunk, data_length)

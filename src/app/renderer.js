@@ -78,6 +78,8 @@ class Main {
         resetDataViewTable()
         resetDataTypeTable()
 
+        if (igz != null) this.showFileButtons(true)
+        
         elm('#pak-import').style.display = 'block' // Show import button
         elm('#back-pak').style.display = 'none'    // Hide back button
         elm('#data-struct').style.display = 'none' // Hide data struct
@@ -147,20 +149,15 @@ class Main {
     }
 
     // Show IGZ content preview in PAK tree
-    static async showIGZPreview(fileIndex) {
-        const file = pak.files[fileIndex]
-
-        igz = null
-        
+    static showIGZPreview(fileIndex) {        
         elm('#data-struct').style.overflow = 'visible'
-        elm('#tree-preview-ctn').style.display = 'block'
-
-        const buffer = await pak.files[fileIndex].getUncompressedData()
+        elm('#igz-open').style.display = 'block'
 
         try {
-            igz = new IGZ(buffer, pak.files[fileIndex].path)
+            igz = IGZ.fromFileInfos(pak.files[fileIndex])
         }
         catch (e) {
+            igz = null
             treePreview.load([{ 
                 text: 'There was an error loading this file.',
                 children: [{ text: e.message }],
@@ -177,9 +174,10 @@ class Main {
 
     // Hide IGZ content preview
     static hideIGZPreview() {
-        elm('#tree-preview-ctn').style.display = 'none'
+        elm('#igz-open').style.display = 'none'
         elm('#data-struct').style.overflow = 'auto'
         treePreview.removeAll()
+        this.showFileButtons(false)
     }
 
     // Set syntax highlighted code in JSON view
@@ -195,6 +193,11 @@ class Main {
         elm('#data-struct').style.display = 'none'
     }
 
+    // Show buttons related to file actions in PAK view (include in pak, rename, clone...)
+    static showFileButtons(visible = true) {
+        elm('#tree-preview-ctn').style.display = visible ? 'block' : 'none'
+    }
+
     // Update window title depending on current file and changes
     static updateTitle() {
         if (this.treeMode === 'pak') {
@@ -207,13 +210,21 @@ class Main {
     }
 
     // Remove all trailing '*' from tree node names
-    static setAllNodesToUpdated() {
+    static clearAllNodesUpdatedState() {
         tree.available().each(e => {
             if (e.text.endsWith('*')) {
                 e.set('text', e.text.slice(0, -1))
             }
         })
         Main.colorizeMainTree()
+    }
+
+    static setNodeToUpdated(node) {
+        if (!node.text.endsWith('*')) {
+            node.set('text', node.text + '*')
+        }
+        this.updateTitle()
+        this.colorizeMainTree()
     }
 
     static saveTreeExpandedState() {
@@ -233,7 +244,7 @@ class Main {
 /**
  * Handles a click on a tree node (in the main tree)
  */
-async function onNodeClick(event, node) 
+function onNodeClick(event, node) 
 {
     // Clicked a file in PAK
     if (Main.treeMode === 'pak') {
@@ -252,7 +263,10 @@ async function onNodeClick(event, node)
             else 
                 Main.hideIGZPreview()
 
+            Main.showFileButtons(true)
             Main.setSyntaxHighlightedCode(pak.files[node.fileIndex])
+
+            elm('#include-in-pkg').checked = pak.files[node.fileIndex].include_in_pkg
         }
     }
     // Clicked a file in IGZ
@@ -346,6 +360,7 @@ function loadPAK(filePath)
     const newPAK = Pak.fromFile(filePath)
     Main.setPak(newPAK)
     Main.showPAKTree()
+    onNodeClick(null, tree.get(0))
 
     // Save a copy of the original file if opening a PAK from the game folder
     if (filePath.startsWith(nstPath + 'archives\\')) {
@@ -362,7 +377,7 @@ function loadPAK(filePath)
 }
 
 // Load a .igz file
-async function loadIGZ(filePath) 
+function loadIGZ(filePath) 
 {
     Main.setPak(null)
     igz = IGZ.fromFile(filePath)
@@ -393,20 +408,26 @@ async function saveFile()
 }
 
 // Save current pak to a .pak file
-async function savePAK(filePath) 
+function savePAK(filePath) 
 {   
-    pak.path = filePath
-
     try {
-        await pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count))
+        pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count))
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', filePath, 0, 1)
         throw e
     }
-    
+
+    pak.path = filePath
     localStorage.setItem('last_file', filePath)
+
     Main.reloadTree(pak.toNodeTree())
+
+    // Update current IGZ preview
+    if (igz != null) {
+        const lastNode = tree.available().find(e => e.type === 'file' && pak.files[e.fileIndex].path === igz.path)
+        onNodeClick(null, lastNode)
+    }
 
     console.log('Saved ' + filePath)
 }
@@ -417,8 +438,7 @@ function saveIGZ(filePath)
     igz.save(filePath)
     localStorage.setItem('last_file', filePath)
 
-    // Main.reloadTree(igz.toNodeTree())
-    Main.setAllNodesToUpdated()
+    Main.clearAllNodesUpdatedState()
     Main.updatedBytes = {}
 
     // TODO: refresh data view
@@ -436,7 +456,7 @@ function updateIGZWithinPAK()
     igzFile.updated = true
 
     Main.updatedBytes = {}
-    Main.setAllNodesToUpdated()
+    Main.clearAllNodesUpdatedState()
     Main.updateTitle()
 
     console.log('Saved IGZ within PAK', igzFile.path)
@@ -470,7 +490,10 @@ async function importToPAK() {
     }
     else {
         // On .pak import, open file selection modal
-        const [selection, updatePKG] = await ipcRenderer.invoke('create-import-modal', { file_path })
+        const res = await ipcRenderer.invoke('create-import-modal', { file_path })
+        if (res == null) return
+
+        const [selection, importDeps] = res
 
         if (selection == null || selection.length == 0) {
             console.warn('Nothing imported')
@@ -480,14 +503,14 @@ async function importToPAK() {
         // Import files to the current pak
         const import_pak = Pak.fromFile(file_path)
 
-        await pak.importFromPak(import_pak, selection, updatePKG)
+        pak.importFromPak(import_pak, selection, importDeps)
     }
 
     // Rebuild PAK tree
     Main.reloadTree(pak.toNodeTree())
 
     // Set focus on the first imported file in the tree view
-    const firstImport = tree.available().find(e => e.fileIndex === pak.files.length - selection.length)
+    const firstImport = tree.available().find(e => e.fileIndex === pak.files.length - 1)
     firstImport.expandParents()
     firstImport.select()
     firstImport.focus()
@@ -554,7 +577,7 @@ function launchGame() {
 /**
  * Main app window entry point
  */
-window.onload = async () => 
+window.onload = () => 
 {
     treePreview = Main.createTree('.tree-preview')
 
@@ -607,6 +630,9 @@ window.onload = async () =>
 
     // "Launch game" button
     elm("#launch-game").addEventListener('click', launchGame)
+    
+    // "Import into PAK" button
+    elm('#pak-import').addEventListener('click', importToPAK)
 
     // "Open IGZ" button
     elm('#igz-open').addEventListener('click', () => {
@@ -614,8 +640,19 @@ window.onload = async () =>
         Main.showIGZTree()
     })
 
-    // "Import" button
-    elm('#pak-import').addEventListener('click', importToPAK)
+    // "Include in package" checkbox
+    elm('#include-in-pkg').addEventListener('click', (event) => {
+        const lastNode = tree.lastSelectedNode()
+
+        if (lastNode != null) {
+            const file = pak.files[lastNode.fileIndex]
+            file.include_in_pkg = event.target.checked
+            file.updated = true
+            pak.updated = true
+
+            Main.setNodeToUpdated(lastNode)
+        }
+    })
 
     // "Rename IGZ" button
     elm('#igz-rename').addEventListener('click', () => {
@@ -637,11 +674,11 @@ window.onload = async () =>
     })
 
     // "Clone IGZ" button
-    elm('#igz-clone').addEventListener('click', async () => {
+    elm('#igz-clone').addEventListener('click', () => {
         const fileIndex = tree.lastSelectedNode().fileIndex
 
         if (fileIndex != null) {
-            await pak.cloneFile(fileIndex)
+            pak.cloneFile(fileIndex)
             Main.reloadTree(pak.toNodeTree())
             const node = tree.available().find(e => e.fileIndex === pak.files.length - 1)
             node.select()
@@ -663,14 +700,12 @@ window.onload = async () =>
         if (fileIndex != null && newFileIndex != null) {
             pak.replaceFileWithinPak(fileIndex, newFileIndex)
 
-            const node = tree.lastSelectedNode()
-            node.set('text', node.text + '*')
-            node.select()
-
             Main.setSyntaxHighlightedCode(pak.files[fileIndex])
             Main.showIGZPreview(fileIndex)
-            Main.updateTitle()
-            Main.colorizeMainTree()
+
+            const node = tree.lastSelectedNode()
+            Main.setNodeToUpdated(node)
+            node.select()
 
             console.log('Replaced', pak.files[fileIndex], pak.files[newFileIndex])
         }
@@ -694,7 +729,7 @@ window.onload = async () =>
         const fileIndex = tree.lastSelectedNode().fileIndex
 
         if (fileIndex != null) {
-            const data = await pak.files[fileIndex].getUncompressedData()
+            const data = pak.files[fileIndex].getUncompressedData()
             const filePath = await ipcRenderer.invoke('save-file', 'igz')
             if (filePath == null) return
             writeFileSync(filePath, new Uint8Array(data))
@@ -713,9 +748,7 @@ window.onload = async () =>
         Main.setSyntaxHighlightedCode(pak.files[lastIndex])
     })
     
-    await loadFile(localStorage.getItem('last_file'))
-
-    onNodeClick(null, tree.get(0))
+    loadFile(localStorage.getItem('last_file'))
 }
 
 /**

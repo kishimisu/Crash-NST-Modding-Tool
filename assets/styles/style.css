@@ -297,6 +297,13 @@ td.hex-updated {
   overflow: auto;
 }
 
+#tree-preview-checkbox {
+  display: flex; 
+  align-items: center; 
+  margin: 5px 0; 
+  gap: 5px;
+}
+
 #tree-preview-buttons {
   display: flex;
   flex-direction: column;

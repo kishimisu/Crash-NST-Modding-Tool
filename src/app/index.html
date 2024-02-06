@@ -15,8 +15,8 @@
             <div id="pak-actions">
                 <button class="tree-preview-btn" id="pak-import">Import</button>
                 <div>
-                    <span>Update package file</span>
-                    <input type="checkbox" id="update-pkg" checked />
+                    <span>Import dependencies</span>
+                    <input type="checkbox" id="import-deps" checked />
                 </div>
             </div>
 
@@ -83,6 +83,10 @@
             <!-- Tree Preview -->
             <div id="tree-preview-ctn">
                 <div id="tree-preview-buttons">
+                    <div id="tree-preview-checkbox">
+                        <span>Include in package file</span>
+                        <input type="checkbox" id="include-in-pkg" />
+                    </div>
                     <button class="tree-preview-btn" id="igz-open" style="height: 30px;">Open</button>
                     <div id="tree-preview-buttons-bottom">
                         <button class="tree-preview-btn" id="igz-clone">Clone</button>

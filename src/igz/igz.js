@@ -28,6 +28,16 @@ class IGZ {
         return new IGZ(data, filePath)
     }
 
+    /**
+     * Construct from FileInfos object
+     * @param {FileInfos} file FileInfos object
+     * @returns {IGZ} new IGZ object
+     */
+    static fromFileInfos(file) {
+        const data = file.getUncompressedData()
+        return new IGZ(data, file.path)
+    }
+
     initialize(buffer) {
         const reader = new BufferView(buffer)
 
@@ -229,16 +239,44 @@ class IGZ {
      * @returns {string[]} A list of unique file paths
      */
     getDependencies(pak) {
-        const findTDEPDependency = (e) => pak.files.find(f => f.path.endsWith(e))?.path
-
         // Get dependencies
         const tdep = this.fixups.TDEP?.data ?? []
-        const tdep_files = tdep.map(([name, path]) => findTDEPDependency(path.split('/').pop())).filter(e => e != null)
+        const exnm = this.fixups.EXNM?.data ?? []
+
+        const getFileName = (str) => {
+            str = str.toLowerCase().split('/').pop()
+            str = str.slice(0, str.lastIndexOf('.'))
+            return str
+        }
+
+        // Convert to names
+        const deps = tdep.concat(exnm).map(([name, path]) => path.includes('.') ? getFileName(path) : null).filter(e => e != null)
 
         // Remove duplicates
-        const all_files = new Set(tdep_files)
+        const all_names = Array.from(new Set(deps))
 
-        return Array.from(all_files)
+        // Get file paths
+        const isDependencyFor = (file_path, name) => {
+            file_path = getFileName(file_path)
+            if (file_path == name) return true
+            // Special case for L104_Boulders
+            // TODO: Find other special cases
+            if (file_path == name + '_behavior' || file_path == name + '_character') {
+                console.log('Additional path:', file_path, 'for', name)
+                return true
+            }
+            return false
+        }
+
+        // Get all file path dependencies for all names
+        let all_paths = all_names.map(name => pak.files.filter(f => isDependencyFor(f.path, name))).flat().map(e => e.path)
+
+        // Remove duplicates
+        all_paths = Array.from(new Set(all_paths))
+
+        // console.log({tstr, tdep, exnm, deps, all_names, all_paths})
+
+        return all_paths
     }
 
     /**
@@ -262,6 +300,8 @@ class IGZ {
 
         const filesByType = Object.fromEntries(typesOrder.map(e => [e, []]))
         const types = new Set()
+        
+        file_paths = file_paths.sort((a, b) => a.localeCompare(b))
 
         // Group files by type
         for (let i = 0; i < file_paths.length; i++) {

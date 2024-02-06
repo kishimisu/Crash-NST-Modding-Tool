@@ -65,12 +65,12 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
     }
     // Import files from external pak
     else {
-        elm("#update-pkg").parentNode.style.display = 'flex'
+        elm("#import-deps").parentNode.style.display = 'flex'
 
         importButton.addEventListener('click', () => {
             const selected = tree.selected()
             const files = selected.map(e => e.fileIndex).filter(e => e != null)
-            ipcRenderer.send('on-file-select', files, elm("#update-pkg").checked)
+            ipcRenderer.send('on-file-select', files, elm("#import-deps").checked)
         })
 
         tree.get(0).expand()

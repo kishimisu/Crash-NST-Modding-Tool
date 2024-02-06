@@ -16,38 +16,18 @@ app.on('window-all-closed', () => {
     }
 })
 
-/**
- * Creates the data/ directory
- */
-function initDirectory() {
-    const dataPath = path.join('.', 'data')
-    const tmpPath = path.join('.', 'data', 'tmp')
-
-    // Create data/ folder if it doesn't exist
-    if(!fs.existsSync(dataPath)) 
-        fs.mkdirSync(dataPath)
-
-    // Remove data/tmp/ folder if it exists
-    else if (fs.existsSync(tmpPath)) {
-        fs.rmSync(tmpPath, { recursive: true })
-    }
-
-    // Create data/tmp/ folder
-    fs.mkdirSync(tmpPath)
-}
-
 /** 
  * Main entry point
  */
 app.whenReady().then(() => {
     // Setup IPC events
-    ipcMain.handle('open-file', showOpenDialog)
-    ipcMain.handle('save-file', showSaveDialog)
+    ipcMain.handle('open-file', showOpenFileDialog)
+    ipcMain.handle('save-file', showSaveFileDialog)
+    ipcMain.handle('open-folder', showOpenFolderDialog)
     ipcMain.handle('eval-calculation', evalCalculation)
     ipcMain.handle('create-import-modal', createImportModal)
     ipcMain.on('set-progress-bar', setProgressBar)
     
-    initDirectory()
     createMainWindow()
   
     app.on('activate', () => {
@@ -104,7 +84,7 @@ function createMainWindow() {
                     accelerator: 'CmdOrCtrl+Shift+S',
                     click: () => win.webContents.send('menu-save-as'),
                 }, { 
-                    label: 'Revert to original',
+                    label: 'Revert Level',
                     accelerator: 'CmdOrCtrl+Shift+R',
                     click: () => win.webContents.send('menu-revert'),
                     
@@ -114,6 +94,26 @@ function createMainWindow() {
                     role: 'close'
                 }, {
                     role: 'quit'
+                }
+            ]
+        },
+        {
+            label: 'Settings',
+            submenu: [
+                {
+                    label: 'Backup game folder',
+                    click: () => win.webContents.send('menu-backup-game-folder')
+                },
+                {
+                    label: 'Restore game folder',
+                    click: () => win.webContents.send('menu-restore-game-folder')
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: 'Change game folder path',
+                    click: () => win.webContents.send('menu-change-game-folder')
                 }
             ]
         }]
@@ -198,7 +198,7 @@ function createImportModal(event, props) {
  * @param {String[]} extensions Array of enabled file extensions
  * @returns the path to the selected file
  */
-function showOpenDialog(event, extensions = ['pak', 'igz']) {
+function showOpenFileDialog(event, extensions = ['pak', 'igz']) {
     const filePath = dialog.showOpenDialogSync({
         properties: ['openFile'],
         filters: [
@@ -213,12 +213,22 @@ function showOpenDialog(event, extensions = ['pak', 'igz']) {
 }
 
 /**
+ * Shows the OS folder selection dialog
+ * 
+ * @returns the path to the selected folder
+ */
+function showOpenFolderDialog() {
+    const filePath = dialog.showOpenDialogSync({ properties: ['openDirectory'] })
+    return filePath ? filePath[0] : null
+}
+
+/**
  * Shows the OS file save dialog
  * 
  * @param {String} extension Enabled file extension
  * @returns the path to the saved file
  */
-function showSaveDialog(event, extension = 'pak') {
+function showSaveFileDialog(event, extension = 'pak') {
     const filePath = dialog.showSaveDialogSync({
         filters: [
             { 
@@ -239,11 +249,11 @@ function showSaveDialog(event, extension = 'pak') {
  * @param {*} current_file Number of files written so far
  * @param {*} file_count Total files to write
  */
-function setProgressBar(event, file_path, current_file, file_count) {
+function setProgressBar(event, file_path, current_file, file_count, message) {
     if (progressBar == null) {
         progressBar = new ProgressBar({
             title: 'Saving to ' + file_path + '...',
-            detail: 'This will take some time on the first time saving a new archive.',
+            detail: message,
             maxValue: 1,
             indeterminate: false,
             browserWindow: {

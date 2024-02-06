@@ -108,6 +108,10 @@ body {
   gap: 10px;
 }
 
+#pak-import {
+  display: none;
+}
+
 /* Level selector */
 
 #level-selector {

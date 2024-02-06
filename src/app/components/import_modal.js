@@ -8,13 +8,21 @@ import { elm } from "../utils.js"
  */
 function init_file_import_modal(Main, onNodeClick, {file_path, files_data, current_file_index})
 {    
-    let pak
-    if (file_path != null) pak = Pak.fromFile(file_path)
-    else if (files_data != null) {
-        pak = new Pak()
-        pak.files = files_data.map(e => new FileInfos(e ?? {}))
+    const pak = Pak.fromFile(file_path)
+
+    if (files_data != null) {
+        files_data.forEach((e, i) => {
+            const file = pak.files.find(f => f.path === e.path)
+            if (file == null) {
+                pak.files.push(new FileInfos(e))
+            }
+            else if (e.updated) {
+                // Remove data for files that have been updated but not saved yet
+                // to indicate that they need to be loaded from the temp folder instead.
+                file.data = null
+            }
+        })
     }
-    else throw new Error('No file data provided')
 
     // Move import button to bottom
     const importButton = elm('#pak-import')
@@ -23,13 +31,12 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
     parent.appendChild(importButton.parentNode)
 
     importButton.disabled = true
+    importButton.style.display = 'block'
     elm('#search-bar').style.display = 'none'
     elm('#level-selector').style.display = 'none'
     elm('#tree-preview-buttons').style.display = 'none'
 
     Main.setPak(pak)
-
-    const multi_import = file_path != null
 
     const tree = Main.createMainTree({
         data: Main.pak.toNodeTree(),
@@ -37,7 +44,7 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
             autoCheckChildren: true
         },
         selection: {
-            mode: multi_import ? 'checkbox' : 'default'
+            mode: files_data == null ? 'checkbox' : 'default'
         }
     })
 

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { exec } from 'child_process'
 import { ipcRenderer } from 'electron'
 import InspireTree from 'inspire-tree'
@@ -10,7 +10,7 @@ import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
 import { resetDataViewTable, resetDataTypeTable } from './components/igz_view.js'
 import { init_file_import_modal } from './components/import_modal.js'
-import { elm } from './utils.js'
+import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './utils.js'
 
 import levels from '../../assets/crash/levels.txt'
 import '../../assets/styles/style.css'
@@ -19,8 +19,6 @@ import '../../assets/styles/hljs.css'
 import FileInfos from '../pak/fileInfos.js'
 
 hljs.registerLanguage('json', jsonLang)
-
-const nstPath = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Crash Bandicoot - N Sane Trilogy\\'
 
 let pak  // Current Pak instance
 let igz  // Current Igz instance 
@@ -227,9 +225,9 @@ class Main {
         Main.colorizeMainTree()
     }
 
-    static setNodeToUpdated(node) {
+    static setNodeToUpdated(node, newName) {
         if (!node.text.endsWith('*')) {
-            node.set('text', node.text + '*')
+            node.set('text', (newName ?? node.text) + '*')
         }
         this.updateTitle()
         this.colorizeMainTree()
@@ -369,34 +367,43 @@ async function loadFile(filePath, extensions = ['igz', 'pak'])
 // Load a .pak file
 function loadPAK(filePath) 
 {
-    const newPAK = Pak.fromFile(filePath)
-    Main.setPak(newPAK)
-    Main.showPAKTree()
-    onNodeClick(null, tree.get(0))
+    try {
+        const newPAK = Pak.fromFile(filePath)
 
-    // Save a copy of the original file if opening a PAK from the game folder
-    if (filePath.startsWith(nstPath + 'archives\\')) {
-        const name = filePath.split('\\').pop().split('\\')[0]
-        const copyPath = './data/originals/' + name
-        if (!existsSync('./data/originals')) mkdirSync('./data/originals')
-        if (!existsSync(copyPath)) {
-            copyFileSync(filePath, copyPath)
-            console.log('Copied original PAK file to ' + copyPath)
+        // Update level selector
+        const findLevelName = (pakName) => {
+            pakName = pakName.toLowerCase().replace('.pak', '')
+            return levels.split('\n').map(e => e.trim()).find(e => e.includes(pakName))
         }
+        elm('#level-select').value = findLevelName(newPAK.getOriginalArchiveName()) ?? levels[1]
+
+        Main.setPak(newPAK)
+        Main.showPAKTree()
+        onNodeClick(null, tree.get(0))
+
+        console.log('Load', filePath)
     }
-    
-    console.log('Load', filePath)   
+    catch (e) {
+        alert('An error occurred while loading the file:\n\n' + e.message)
+        throw e
+    }
 }
 
 // Load a .igz file
 function loadIGZ(filePath) 
 {
-    Main.setPak(null)
-    igz = IGZ.fromFile(filePath)
-    Main.igz = igz
-    Main.showIGZTree()
+    try {
+        Main.setPak(null)
+        igz = IGZ.fromFile(filePath)
+        Main.igz = igz
+        Main.showIGZTree()
 
-    console.log('Load', filePath)   
+        console.log('Load', filePath)   
+    }
+    catch (e) {
+        alert('An error occurred while loading the file:\n\n' + e.message)
+        throw e
+    }
 }
 
 // Save a .pak or .igz file
@@ -423,10 +430,12 @@ async function saveFile()
 function savePAK(filePath) 
 {   
     try {
-        pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count))
+        const message = 'This will take some time on the first time saving a new archive.' 
+        pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count, message))
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', filePath, 0, 1)
+        alert('An error occurred while saving the file:\n\n' + e.message)
         throw e
     }
 
@@ -510,15 +519,23 @@ async function importToPAK() {
 
         const [selection, importDeps] = res
 
-        if (selection == null || selection.length == 0) {
-            console.warn('Nothing imported')
-            return
-        }
+        if (selection == null || selection.length == 0) return
         
         // Import files to the current pak
         const import_pak = Pak.fromFile(file_path)
 
-        pak.importFromPak(import_pak, selection, importDeps)
+        const message = 'Importing files to PAK...'
+        const progress_callback = (path, current, total) => ipcRenderer.send('set-progress-bar', path, current, total, message)
+
+        try {
+            const import_count = pak.importFromPak(import_pak, selection, importDeps, progress_callback)
+            if (importDeps) alert(`Successfully imported ${import_count} files.`)
+        }
+        catch (e) {
+            ipcRenderer.send('set-progress-bar', '', 0, 1)
+            alert('An error occurred while importing the file:\n\n' + e.message)
+            throw e
+        }
     }
 
     // Rebuild PAK tree
@@ -531,26 +548,13 @@ async function importToPAK() {
     firstImport.focus()
 }
 
-/**
- * Try to detect the original name of the archive from its package file
- * @returns the name of the original .pak file 
- */
-function getOriginalPAKName() {
-    let node = tree.get(0).children.find(e => e.text === 'packages/')
-    
-    // Find last node under the packages/ folder
-    while (node?.children?.length > 0) node = node.children[0]
-    
-    const name = node.text.replaceAll('.igz', '').replaceAll('_pkg', '') + '.pak'
-    
-    return name
-}
-
-// Revert a .pak file to its original content (saved when loading a PAK from the game folder)
+// Revert a .pak file to its original content
 function revertPakToOriginal() {
-    const name = getOriginalPAKName()
-    const savedPath = './data/originals/' + name
-    const originalPath = nstPath + 'archives\\' + name
+    if (!isGameFolderSet()) return alert('Game folder not set')
+
+    const name = pak.getOriginalArchiveName()
+    const savedPath = getBackupFolder(name)
+    const originalPath = getArchiveFolder(name)
 
     if (!existsSync(savedPath)) {
         alert('No original file found')
@@ -569,7 +573,9 @@ function revertPakToOriginal() {
  * Launch the game executable with the selected level
  */
 function launchGame() {
-    const exePath = nstPath + 'CrashBandicootNSaneTrilogy.exe'    
+    if (!isGameFolderSet()) return alert('Game folder not set')
+
+    const exePath = getGameFolder('CrashBandicootNSaneTrilogy.exe')
     const level = elm('#level-select').value
     
     localStorage.setItem('last_level', level)
@@ -580,13 +586,76 @@ function launchGame() {
 
     if (elm('#use-current-pak').checked) {
         // Replace pak in game folder with current pak
-        const originalName = getOriginalPAKName()
-        console.log(`Replaced ${originalName} with ${pak.path}`)
-        copyFileSync(pak.path, nstPath + 'archives\\' + originalName)
+        const originalName = pak.getOriginalArchiveName()
+        const originalPath = getArchiveFolder(originalName)
+        console.log(`Replaced ${originalPath} with ${pak.path}`)
+        copyFileSync(pak.path, originalPath)
     }
 
     const cmd = `"${exePath}" -om ${level}/${level.split('/')[1]}`
     exec(cmd)
+}
+
+/**
+ * Saves a backup of every .pak file in the game archives/ folder, or restore it
+ */
+function backupGameFolder(restore = false) {
+    const messages = {
+        confirm: {
+            true: 'Do you want to restore the game folder to its original state? This will revert all levels to their original content.',
+            false: 'Do you want to backup the game folder? This will allow you to revert any level to its original state.'
+        },
+        progress: {
+            true: 'Restoring game folder...',
+            false: 'Backing up game folder...'
+        },
+        success: {
+            true: 'Game folder restored successfully.',
+            false: 'Game folder backed up successfully. You can revert levels with File->Revert'
+        }
+    }
+
+    if (!isGameFolderSet()) return alert('Game folder not set')
+
+    const backupFolderPath = getBackupFolder()
+
+    if (restore && readdirSync(backupFolderPath).length == 0) {
+        return alert('No backup found.')
+    }
+
+    const ok = confirm(messages.confirm[restore])
+    if (!ok) return
+
+    const files = readdirSync(getArchiveFolder())
+
+    try {
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i]
+            const originalPath = getArchiveFolder(file)
+            const backupPath = getBackupFolder(file)
+
+            ipcRenderer.send('set-progress-bar', file, i, files.length, messages.progress[restore])
+
+            if (restore) copyFileSync(backupPath, originalPath)
+            else copyFileSync(originalPath, backupPath)
+        }
+        alert(messages.success[restore])
+    }
+    catch (e) {
+        ipcRenderer.send('set-progress-bar', '', 0, 1)
+        alert('An error occurred:\n\n' + e.message)
+        throw e
+    }
+}
+
+/**
+ *  Updates the saved game folder path
+ */
+async function changeGameFolderPath() {
+    const folder = await ipcRenderer.invoke('open-folder')
+    if (folder == null) return
+    localStorage.setItem('game_folder', folder)
+    backupGameFolder()
 }
 
 /**
@@ -651,13 +720,13 @@ window.onload = () =>
     /// Buttons
 
     // "Launch game" button
-    elm("#launch-game").addEventListener('click', launchGame)
+    elm("#launch-game").addEventListener('click', () => launchGame())
     
     // "Import into PAK" button
-    elm('#pak-import').addEventListener('click', importToPAK)
+    elm('#pak-import').addEventListener('click', () => importToPAK())
 
     // "Open IGZ" button
-    elm('#igz-open').addEventListener('click', Main.showIGZTree)
+    elm('#igz-open').addEventListener('click', () => Main.showIGZTree())
 
     // "Include in package" checkbox
     elm('#include-in-pkg').addEventListener('click', (event) => {
@@ -709,12 +778,15 @@ window.onload = () =>
         const fileIndex = tree.lastSelectedNode().fileIndex
 
         for (const file of pak.files.filter(e => !e.original)) {
-            writeFileSync(`./data/tmp/${file.id}`, new Uint8Array(file.data))
+            writeFileSync(getTempFolder(file.id), new Uint8Array(file.data))
         }
         const [newFileIndex] = await ipcRenderer.invoke('create-import-modal', {
+            file_path: pak.path,
             files_data: pak.files.map(e => e.toJSON()),
             current_file_index: fileIndex
-        })
+        }) ?? [null]
+
+        if (newFileIndex == null) return
 
         if (fileIndex != null && newFileIndex != null) {
             pak.replaceFileWithinPak(fileIndex, newFileIndex)
@@ -775,18 +847,19 @@ window.onload = () =>
             const object = igz.objects[node.objectIndex]
             igz.setObjectActive(object, !event.target.checked)
 
-            tree.available().forEach(e => {
-                if (e.type == 'object') {
-                    const obj = igz.objects[e.objectIndex]
-                    if (updated_objects.includes(obj)) {
-                        e.set('text', obj.getName() + '*')
-                    }
-                }
-            })
-            Main.colorizeMainTree()
-            Main.updateTitle()
+            Main.setNodeToUpdated(node, object.getName())
         }
     })
+
+    if (localStorage.getItem('first_launch') == null) {
+        localStorage.setItem('first_launch', false)
+
+        const defaultGameFolder = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Crash Bandicoot - N Sane Trilogy\\'
+        if (existsSync(defaultGameFolder)) {
+            localStorage.setItem('game_folder', defaultGameFolder)
+            backupGameFolder()
+        }
+    }
     
     loadFile(localStorage.getItem('last_file'))
 }
@@ -805,5 +878,8 @@ ipcRenderer.on('menu-import' , (_, props) => importToPAK(props))
 ipcRenderer.on('menu-save'   , (_, props) => saveFile(props))
 ipcRenderer.on('menu-save-as', (_, props) => saveFile(props))
 ipcRenderer.on('menu-revert' , (_, props) => revertPakToOriginal(props))
+ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
+ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
+ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 
 if (process.env.NODE_ENV === 'development') window.Main = Main

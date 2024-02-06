@@ -116,11 +116,6 @@ class Fixup {
             throw new Error ('Update not implemented: ' + this.type)
         }
 
-        if (['RVTB', 'ONAM', 'ROFS'].includes(this.type))
-            console.log('Updating', this.type, 'from', oldData, 'to', this.data)
-        else
-            console.log('Updating', this.type, ' size from', oldData.length, 'to', this.data.length)
-
         this.rawData = this.rawData.slice(0, this.header_size).concat(encoded)
         this.size = this.rawData.length
         this.item_count = this.data.length

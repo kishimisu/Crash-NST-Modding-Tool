@@ -293,8 +293,10 @@ class Pak {
      * @param {Pak} import_pak The .pak to import from
      * @param {int[]} files The indexes of the files to import
      * @param {boolean} import_dependencies Whether to recursively import all dependencies into the current .pak (and package file)
+     * @param {function} progress_callback Callback function to update the progress bar
+     * @returns The number of files imported
      */
-    importFromPak(import_pak, file_ids, import_dependencies = true) {
+    importFromPak(import_pak, file_ids, import_dependencies = true, progress_callback) {
 
         let pak_deps = []
         let pkg_deps = []
@@ -327,12 +329,28 @@ class Pak {
         while (pak_deps.length > 0 && import_dependencies) {
             const path = pak_deps.pop()
             const file = import_pak.files.find(e => e.path == path)
-            if (file == null) throw new Error('File not found: ' + path)
+
+            if (file == null) {
+                console.warn('File not found: ' + path)
+                continue
+            }
+
+            if (progress_callback) progress_callback(path, pkg_deps.length, pkg_deps.length + pak_deps.length + 1)
+
             addFileAndDependencies(file)
         }
 
-        console.log('Imported', pkg_deps.length, 'files')
         this.updated = true
+
+        return pkg_deps.length
+    }
+
+    /**
+     * Get the original name of the archive from its package file
+     * @returns the name of the original .pak file 
+     */
+    getOriginalArchiveName() {
+        return this.package_igz.path.split('/').pop().replaceAll('.igz', '.pak').replaceAll('_pkg', '')
     }
 
     cloneFile(index) {

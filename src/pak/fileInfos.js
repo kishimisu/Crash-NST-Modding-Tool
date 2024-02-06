@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "fs"
 import { BufferView, bytesToUInt, intToBytes } from "../utils"
 import { decompress } from 'lzma'
+import { getCacheFolder, getTempFolder } from "../app/utils"
 
 class FileInfos {
     constructor({ id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {
@@ -40,24 +41,25 @@ class FileInfos {
     getUncompressedData() {
         let needs_caching = false
 
+        // Case where we're trying to read updated data from the import modal
+        if (this.data == null) {
+            return readFileSync(getTempFolder(this.id))
+        }
+        // Return raw data if not compressed
+        else if (!this.isCompressed()) {
+            return this.data.slice()
+        }
         // If it's an original and compressed file
-        if (this.original && this.isCompressed()) {
+        else if (this.original) {
             try {
                 // Try to read cached decompressed data
-                return readFileSync(`./data/${this.id}`)
+                return readFileSync(getCacheFolder(this.id))
             }
             catch {
                 // If it failed, decompress and cache it
                 needs_caching = true
             }
         }
-        // Case where we're trying to read custom data from the import modal
-        else if (!this.original && this.data == null) {
-            return readFileSync(`./data/tmp/${this.id}`)
-        }
-        
-        // Return raw data if not compressed
-        if (!this.isCompressed()) return this.data.slice()
 
         const CHUNK_SIZE = 32768
         const CHUNK_ALIGN = 2048
@@ -121,7 +123,8 @@ class FileInfos {
         }
 
         if (needs_caching) {
-            writeFileSync(`./data/${this.id}`, data)
+            // Cache decompressed data
+            writeFileSync(getCacheFolder(this.id), data)
         }
 
         return data
@@ -152,6 +155,7 @@ class FileInfos {
             full_path: this.full_path,
             path: this.path,
             original: this.original,
+            updated: this.updated,
         }
     }
 }

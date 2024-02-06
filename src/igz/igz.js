@@ -206,7 +206,7 @@ class IGZ {
             const prevEndOffset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
 
             if (object.offset != prevEndOffset) {
-                console.log('Updated START offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + (object.offset - prevEndOffset) + ')')
+                // console.log('Updated START offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + (object.offset - prevEndOffset) + ')')
                 object.offset = prevEndOffset
             }
         }

@@ -8,13 +8,19 @@ This is a very early demo, bugs may appear. Feedback and contributions are welco
 
 ### PAK explorer
 
+*Allows you to explore .pak archives*
+
 **Important Note**: No change will be applied until the file is saved. Moreover on the very first time saving a new archive, every file of the archive will be decompressed and cached (which can take some time). Subsequent saves should be way faster than the first one.
 
-*Allows you to explore .pak archives*
+**Change the game folder**: You can change the directory of the game in the Settings menu. It should point to the folder containing `CrashBandicootNSaneTrilogy.exe`
+
+**Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
+
+#### PAK Controls
 
 - **Launch Level**: Run the game at the selected level. If `Use current pak` is checked, the original level archive will be overwritten with the current one.
 
-- **Revert to Original**: Revert the original archive (in the game folder) to its default state. Does not reset the content of the current archive being explored.
+- **File -> Revert Level**: Revert the original archive (in the game folder) to its default state. Does not reset the content of the current archive being explored.
 
 - **Import**: Import either a single .igz file or a selection of files from another PAK archive into the current one. If `Update package file` is selected, all dependencies will also be imported recursively, and the _pkg.igz file will be rebuilt.
 
@@ -22,13 +28,17 @@ This is a very early demo, bugs may appear. Feedback and contributions are welco
 
 - **Open**: Open the file to access and edit its content.
 
+- **Include in package file**: Whether the file should be loaded by the game or not.
+
 - **Replace**: Replace the content of a file with another one from the current PAK archive.
 
 - **Clone**: Duplicate a file and its content.
 
-- **Delete**: Remove a file.
-
 - **Extract**: Uncompress & save a file from a PAK archive to the disk.
+
+- **Delete**: Remove a file from the archive.
+
+- **Rename**: Rename a file.
 
 ### IGZ explorer
 
@@ -40,7 +50,11 @@ This is a very early demo, bugs may appear. Feedback and contributions are welco
 
 - **Fixups**: Fixups containing list of offsets are directly translated to the object they're pointing to in their child view. Other fixups contains their original data (strings or int list)
 
-## Data editing
+### Disabling objects
+
+By default, all objects in a .igz file are enabled. You can choose to disable specific objects when clicking on them. It has best results for root objects, and can result in crashes.
+
+### Data editing
 
 You have the possibility to edit any object's data in the IGZ explorer by clicking on a cell in the object's data view.
 
@@ -89,10 +103,7 @@ yarn start
 - src/app/renderer.js: Actual app implementation (UI & state)
 
 ## TODO
-- Add possibility to change installed game path (currently defaults to `C:\Program Files (x86)\Steam\steamapps\common\Crash Bandicoot - N Sane Trilogy`)
 - Texture & Audio preview
-- Automatically add new external dependencies
-- Add possibility to rebuild the _pkg.igz file
 - Add compressed mode to avoid having to uncompress every file
 
 ## Special Thanks

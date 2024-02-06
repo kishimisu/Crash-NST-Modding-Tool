@@ -253,41 +253,38 @@ class Pak {
     }
     
     /**
-     * Update the package file, additionnally adding new files if specified
-     * @param {string[] | null} new_files The paths to add
+     * Update the package file using the current list of files and their include_in_pkg flags
      */
-    updatePackageFile(new_files) {
+    updatePackageFile() {
         // Get current paths listed in the package file
         const pkg_files = this.package_igz.fixups.TSTR.data.filter(e => e.includes('.'))
+        let updated = false
 
-        // Update which files are included in the package file
+        // Update which files are included
         for (const file of this.files) {
             const path = file.path.toLowerCase()
             const existsInPKG = pkg_files.includes(path)
 
             if (file.include_in_pkg && !existsInPKG) {
+                updated = true
                 pkg_files.push(path)
             }
             else if (!file.include_in_pkg && existsInPKG) {
+                updated = true
                 pkg_files.splice(pkg_files.indexOf(path), 1)
             }
         }
-        
-        // Add new files
-        for (const path of new_files ?? []) {
-            if (pkg_files.includes(path.toLowerCase()))
-                continue
-
-            pkg_files.push(path.toLowerCase())
-        }
 
         // Update package file
-        const new_data = this.package_igz.updatePKG(pkg_files)
-        const package_file = this.files.find(e => e.path == this.package_igz.path)
-        package_file.data = new_data
-        package_file.size = new_data.length
-        package_file.original = false
-        package_file.updated = true
+        if (updated) {
+            const new_data = this.package_igz.updatePKG(pkg_files)
+            const package_file = this.files.find(e => e.path == this.package_igz.path)
+            package_file.data = new_data
+            package_file.size = new_data.length
+            package_file.compression = 0xFFFFFFFF
+            package_file.original = false
+            package_file.updated = true
+        }
     }
 
     /**
@@ -352,7 +349,8 @@ class Pak {
             full_path: updatePath(file.full_path),
             path: updatePath(file.path),
             original: false,
-            updated: true
+            updated: true,
+            include_in_pkg: false
         })
 
         this.files.push(new_file)

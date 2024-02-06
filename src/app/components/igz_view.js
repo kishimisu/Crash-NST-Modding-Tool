@@ -1,5 +1,6 @@
 import igObject from "../../igz/igObject"
 import editSVG from '../../../assets/images/edit.svg'
+import { elm } from "../utils"
 
 function resetDataViewTable(display = 'none') {
     const table = document.getElementById('data-table')
@@ -22,6 +23,7 @@ igObject.prototype.createDataViewTable = function(Main, index, cell)
     const bytesPerRow = 16
 
     resetDataViewTable('flex')
+    elm('#disable-object').checked = this.disabled
 
     let row = document.createElement('tr')
 
@@ -326,7 +328,6 @@ igObject.prototype.updateDataFromTable = function(Main, value, index, type, isRe
 
     igz.updated = true
     this.updated = true
-    Main.updateTitle()
 
     if (updatedBytes[this.index] == null) updatedBytes[this.index] = {}
     if (updatedBytes[this.index][index] == null) updatedBytes[this.index][index] = true
@@ -336,6 +337,9 @@ igObject.prototype.updateDataFromTable = function(Main, value, index, type, isRe
             e.set('text', e.text + '*')
         }
     })
+
+    Main.colorizeMainTree()
+    Main.updateTitle()
 
     return value
 }

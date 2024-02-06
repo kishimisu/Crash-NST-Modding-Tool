@@ -79,7 +79,7 @@ class Main {
         resetDataTypeTable()
 
         if (igz != null) this.showFileButtons(true)
-        
+
         elm('#pak-import').style.display = 'block' // Show import button
         elm('#back-pak').style.display = 'none'    // Hide back button
         elm('#data-struct').style.display = 'none' // Hide data struct
@@ -90,8 +90,10 @@ class Main {
     // Init main tree view for IGZ file
     static showIGZTree() {
         if (igz == null) return
+        if (pak != null) this.saveTreeExpandedState()
 
         this.treeMode = 'igz'
+        tree.load([]) 
         tree.load(igz.toNodeTree())
         tree.each(e => e.expand())
 
@@ -126,6 +128,8 @@ class Main {
 
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree() {
+        const defaultColor = 'white'
+
         tree.available().forEach(e => {
             // PAK file node
             if (e.type === 'file') {
@@ -134,16 +138,20 @@ class Main {
                 else if (!pak.files[e.fileIndex].original)
                     e.itree.ref.style.color = '#21ff78'
                 else
-                    e.itree.ref.style.color = ''
+                    e.itree.ref.style.color = defaultColor
             }
             // PAK folder node
             else if (e.type === 'folder') {
-                e.itree.ref.childNodes[0].style.color = e.updated ? '#ffaf36' : ''
+                e.itree.ref.childNodes[0].style.color = e.updated ? '#ffaf36' : defaultColor
             }
             // IGZ object node
             else if (e.type === 'object') {
                 if (igz.objects[e.objectIndex].updated)
                     e.itree.ref.style.color = '#ffaf36'
+                else if (igz.objects[e.objectIndex].disabled)
+                    e.itree.ref.style.color = '#bababa'
+                else
+                    e.itree.ref.style.color = defaultColor
             }
         })
     }
@@ -236,7 +244,10 @@ class Main {
         if (this.lastCollapsedState == null) return
         tree.available().forEach((e, i) => {
             if (this.lastCollapsedState[i]) e.expand()
-            if (e.fileIndex === this.lastFileIndex) e.select()                       
+            if (e.fileIndex === this.lastFileIndex) {
+                e.focus()
+                e.select()
+            }
         })
     }
 }
@@ -340,7 +351,8 @@ function searchTree(str, caseSensitive = false) {
 // Load a .pak or .igz file
 async function loadFile(filePath, extensions = ['igz', 'pak']) 
 {
-    filePath ??= await ipcRenderer.invoke('open-file', extensions)
+    if (filePath == null || !existsSync(filePath))
+        filePath = await ipcRenderer.invoke('open-file', extensions)
 
     if (filePath == null) {
         console.warn('No file selected')
@@ -452,9 +464,12 @@ function updateIGZWithinPAK()
     const igzFile = pak.files[Main.lastFileIndex]
 
     igzFile.data = igz.save()
+    igzFile.size = igzFile.data.length
+    igzFile.compression = 0xFFFFFFFF
     igzFile.original = false
     igzFile.updated = true
 
+    pak.updated = true
     Main.updatedBytes = {}
     Main.clearAllNodesUpdatedState()
     Main.updateTitle()
@@ -586,7 +601,14 @@ window.onload = () =>
 
     // Create main tree
     Main.createMainTree({ editable: true, editing: { add: false, edit: true, remove: false }})
+
+    // Main tree nodes click event
     tree.on('node.click', onNodeClick)
+    tree.on('node.dblclick', (event, node) => {
+        if (node.type === 'file') {
+            Main.showIGZTree() // Open IGZ from PAK on double click
+        }
+    })
 
     /// Search bar
     const caseSensitiveElm = elm('#case-sensitive')
@@ -635,10 +657,7 @@ window.onload = () =>
     elm('#pak-import').addEventListener('click', importToPAK)
 
     // "Open IGZ" button
-    elm('#igz-open').addEventListener('click', () => {
-        Main.saveTreeExpandedState()
-        Main.showIGZTree()
-    })
+    elm('#igz-open').addEventListener('click', Main.showIGZTree)
 
     // "Include in package" checkbox
     elm('#include-in-pkg').addEventListener('click', (event) => {
@@ -737,7 +756,7 @@ window.onload = () =>
         }
     })
 
-    /// Back to .pak button
+    // (IGZ view) Back to .pak button
     elm('#back-pak').addEventListener('click', () => {
         const confirm = !igz.updated || window.confirm('Warning: you have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
@@ -746,6 +765,27 @@ window.onload = () =>
         Main.restoreTreeExpandedState()
         Main.showIGZPreview(lastIndex)    
         Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+    })
+
+    // (IGZ view) "Disable object" checkbox
+    elm('#disable-object').addEventListener('click', (event) => {
+        const node = tree.lastSelectedNode()
+
+        if (node.type === 'object') {
+            const object = igz.objects[node.objectIndex]
+            igz.setObjectActive(object, !event.target.checked)
+
+            tree.available().forEach(e => {
+                if (e.type == 'object') {
+                    const obj = igz.objects[e.objectIndex]
+                    if (updated_objects.includes(obj)) {
+                        e.set('text', obj.getName() + '*')
+                    }
+                }
+            })
+            Main.colorizeMainTree()
+            Main.updateTitle()
+        }
     })
     
     loadFile(localStorage.getItem('last_file'))

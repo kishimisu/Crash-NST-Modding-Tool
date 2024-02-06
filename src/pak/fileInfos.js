@@ -3,7 +3,7 @@ import { BufferView, bytesToUInt, intToBytes } from "../utils"
 import { decompress } from 'lzma'
 
 class FileInfos {
-    constructor({ id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false }) {
+    constructor({ id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {
         this.id = id
         this.offset = offset
         this.ordinal = ordinal
@@ -14,7 +14,7 @@ class FileInfos {
 
         this.data = data
 
-        this.include_in_pkg = true
+        this.include_in_pkg = include_in_pkg
         this.original = original
         this.updated = updated
     }

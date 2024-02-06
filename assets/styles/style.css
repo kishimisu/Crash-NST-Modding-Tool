@@ -193,6 +193,7 @@ code {
 
 #data-table-ctn {
   overflow-y: auto;
+  margin-bottom: 5px;
 }
 
 .hex-header {
@@ -222,6 +223,7 @@ table {
 
   font-family: Chivo;
   font-weight: 400;
+  text-wrap: balance;
 }
 
 tr:nth-child(even) {
@@ -297,11 +299,12 @@ td.hex-updated {
   overflow: auto;
 }
 
-#tree-preview-checkbox {
+#checkbox-input {
   display: flex; 
   align-items: center; 
   margin: 5px 0; 
   gap: 5px;
+  font-size: .8rem;
 }
 
 #tree-preview-buttons {

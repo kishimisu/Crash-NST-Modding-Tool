@@ -15,9 +15,7 @@ const interesting_fields = {
 }
 
 class ObjectView {
-    constructor(Main, object) {
-        this.Main = Main
-
+    constructor(object) {
         const fields = TYPES_METADATA[object.type].slice() // Retrieve type metadata
 
         this.container = elm('#object-view') // Field list container
@@ -31,8 +29,6 @@ class ObjectView {
         // Update object display name
         elm('#object-name').innerText = object.getDisplayName()
                 
-        console.log(object, fields)
-
         this.findInterestingFields()
         this.createFieldList()
         this.createHexDataCells()
@@ -47,7 +43,7 @@ class ObjectView {
         let row = document.createElement('tr')
         this.hexCells = []
 
-        this.Main.showObjectDataView(true)
+        Main.showObjectDataView(true)
 
         // Iterate over every 4 bytes of the object's data
         for (let i = 0; i < this.object.data.length; i += 4) {
@@ -254,7 +250,7 @@ class ObjectView {
                 return val
             }
             const offset = object.view.readUInt(field.offset)
-            const refOjbect = offset > 0 ? this.Main.igz.objects.find(e => e.offset == offset) : null
+            const refOjbect = offset > 0 ? Main.igz.objects.find(e => e.offset == offset) : null
             const areTypeEqual = (a, b) => a.replace('ig', 'C') == b.replace('ig', 'C')
             const names = Main.igz.objects.filter(e => areTypeEqual(e.type, field.metaObject)).map(e => e.getDisplayName())
             input = createDropdownInput(names, refOjbect?.getDisplayName())
@@ -302,10 +298,10 @@ class ObjectView {
         }
 
         this.object.updated = Object.keys(updated_data[this.object.index] ?? {}).length > 0
-        this.Main.igz.updated = true
+        Main.igz.updated = true
 
-        this.Main.updateTitle()
-        this.Main.colorizeMainTree()
+        Main.updateTitle()
+        Main.colorizeMainTree()
     }
 
     /** 
@@ -332,6 +328,8 @@ class ObjectView {
             else if (value.startsWith('-=')) num = previousValue - num
             else if (value.startsWith('*')) num = previousValue * num
             else if (value.startsWith('/')) num = previousValue / num
+            
+            if (type === 'Float') num = parseFloat(num.toFixed(3))
 
             // Update input value
             input.value = num
@@ -368,7 +366,7 @@ class ObjectView {
         }
         else if (field.type == 'igObjectRefMetaField') {
             previousValue = object.view.readUInt(field.offset)
-            value = this.Main.igz.objects.find(e => e.getDisplayName() == value)?.offset ?? 0
+            value = Main.igz.objects.find(e => e.getDisplayName() == value)?.offset ?? 0
             object.view.setUInt(value, field.offset)
         }
         else if (field.type == 'igBitFieldMetaField') {
@@ -392,7 +390,7 @@ class ObjectView {
         addUpdatedData(object, this.fields.indexOf(field), value, previousValue, id)
 
         // Update object's node name in tree view
-        const node = this.Main.tree.available().find(e => e.objectIndex == object.index)
+        const node = Main.tree.available().find(e => e.objectIndex == object.index)
         const updated = this.isFieldUpdated(field)
         if (!updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
         else if (updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
@@ -496,7 +494,7 @@ class ObjectView {
         }
 
         // Calculate interesting fields
-        const allObjects = this.Main.igz.objects.filter(e => e.type == this.object.type)
+        const allObjects = Main.igz.objects.filter(e => e.type == this.object.type)
         let interestingFields = []
 
         for (let i = 0; i < this.fields.length; i++) {

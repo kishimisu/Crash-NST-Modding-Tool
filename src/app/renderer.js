@@ -297,7 +297,7 @@ function onNodeClick(event, node)
             if (fixup && fixup.isEncoded()) {
                 const child = fixup.getCorrespondingObject(node.offset, igz.objects)?.object
                 Main.hideStructView()
-                new ObjectView(Main, child)
+                new ObjectView(child)
             }
             else {
                 Main.hideStructView()
@@ -308,7 +308,7 @@ function onNodeClick(event, node)
         else if (node.type === 'object') {
             const object = igz.objects[node.objectIndex]
             Main.hideStructView()
-            new ObjectView(Main, object)
+            new ObjectView(object)
 
             if (elm('#search').value == '') {
                 elm('#search').value = object.getName()
@@ -463,6 +463,7 @@ function saveIGZ(filePath)
 
     Main.clearAllNodesUpdatedState()
     clearUpdatedData()
+    Main.updateTitle()
 
     // TODO: refresh data view
 
@@ -884,4 +885,4 @@ ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
 ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 
-if (process.env.NODE_ENV === 'development') window.Main = Main
+window.Main = Main

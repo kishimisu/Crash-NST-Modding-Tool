@@ -101,6 +101,10 @@ function createMainWindow() {
             label: 'Settings',
             submenu: [
                 {
+                    label: 'Change game folder path',
+                    click: () => win.webContents.send('menu-change-game-folder')
+                },
+                {
                     label: 'Backup game folder',
                     click: () => win.webContents.send('menu-backup-game-folder')
                 },
@@ -112,33 +116,28 @@ function createMainWindow() {
                     type: 'separator'
                 },
                 {
-                    label: 'Change game folder path',
-                    click: () => win.webContents.send('menu-change-game-folder')
+                    label: 'Open dev tools',
+                    click: () => win.webContents.openDevTools()
                 }
             ]
-        }]
-
-        if (process.env.NODE_ENV === 'development') {  
-            menu_template.push({ role: 'viewMenu' })
+        },
+        {
+            role: 'windowMenu'
+        }, 
+        {
+            label: 'About',
+            submenu: [
+                {
+                    label: 'README.md',
+                    click: () => shell.openExternal('https://github.com/kishimisu/Crash-NST-Modding-Tool/blob/main/README.md')
+                },
+                {
+                    label: 'Contribute on Github!',
+                    click: () => shell.openExternal('https://github.com/kishimisu/Crash-NST-Modding-Tool')
+                }
+            ]
         }
-
-        menu_template.push(
-            {
-                role: 'windowMenu'
-            }, 
-            {
-                label: 'About',
-                submenu: [
-                    {
-                        label: 'README.md',
-                        click: () => shell.openExternal('https://github.com/kishimisu/Crash-NST-Modding-Tool/blob/main/README.md')
-                    },
-                    {
-                        label: 'Contribute on Github!',
-                        click: () => shell.openExternal('https://github.com/kishimisu/Crash-NST-Modding-Tool')
-                    }
-                ]
-            })
+    ]
 
     win.setMenu(Menu.buildFromTemplate(menu_template))
     win.loadURL(MAIN_WINDOW_WEBPACK_ENTRY)

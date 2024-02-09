@@ -2,6 +2,8 @@ import types_metadata from '../../../assets/crash/types.metadata'
 import { BufferView, bitRead, bitReplace } from '../../utils'
 import { elm } from "../utils"
 
+// Process types metadata and hierarchy from file
+const TYPES_HIERARCHY = {}
 const TYPES_METADATA = read_all_types_metadata()
 
 // Keep track of updated fields within objects
@@ -61,7 +63,7 @@ class ObjectView {
             const cell = document.createElement('td')
             cell.innerText = (value >>> 0).toString(16).toUpperCase().padStart(8, '0').replace(/(.{2})/g, '$1 ')
 
-            if (value === 0) cell.classList.add('hex-zero')
+            if (value === 0 || i < 16) cell.classList.add('hex-zero')
             
             // Create hex cell object
             const hexCell = { element: cell, offset: i }
@@ -158,7 +160,7 @@ class ObjectView {
 
         // Field type
         const type = document.createElement('td')
-        type.title = `Type: ${field.type} ` + (field.bitfield ? `| Bits: ${field.bits}, Shift: ${field.shift}` : '')
+        type.title = `Type: ${field.type}${field.metaObject ? ' | ' + field.metaObject : ''} ` + (field.bitfield ? `| Bits: ${field.bits}, Shift: ${field.shift}` : '')
         type.style.fontStyle = field.bitfieldRoot ? 'italic' : ''
         type.innerText = this.prettifyType(field)
         type.classList.add(this.getFieldColor(field))
@@ -245,14 +247,11 @@ class ObjectView {
             input = createDropdownInput(Main.igz.fixups.TSTR.data, name)
         }
         else if (type == 'igObjectRefMetaField') {
-            if (field.metaObject == null) {
-                val.innerText = '<No metaObject>'
-                return val
-            }
             const offset = object.view.readUInt(field.offset)
-            const refOjbect = offset > 0 ? Main.igz.objects.find(e => e.offset == offset) : null
-            const areTypeEqual = (a, b) => a.replace('ig', 'C') == b.replace('ig', 'C')
-            const names = Main.igz.objects.filter(e => areTypeEqual(e.type, field.metaObject)).map(e => e.getDisplayName())
+            const refOjbect = offset > 0 ? Main.igz.objects.find(e => offset >= e.offset && offset < e.offset + e.size) : null
+            const inheritedClasses = getAllInheritedChildren(field.metaObject)
+            inheritedClasses.add(field.metaObject)
+            const names = Main.igz.objects.filter(e => inheritedClasses.has(e.type)).map(e => e.getDisplayName())
             input = createDropdownInput(names, refOjbect?.getDisplayName())
         }
         else if (type == 'igBitFieldMetaField') {
@@ -283,15 +282,13 @@ class ObjectView {
     // Update an object's data when a field is modified
     // Apply changes to all objects if the "Apply to all" checkbox is checked
     onFieldUpdate(input, field, value, id) {
-        if (elm('#apply-all-checkbox').checked) {
-            const searchMatches = Main.tree.matched()
-    
-            if (searchMatches.length > 0) {
-                searchMatches.each(e => {
-                    const object = Main.igz.objects[e.objectIndex]
-                    this.updateObjectData(object, input, field, value, id)
-                })
-            }
+        const searchMatches = Main.tree.matched()
+
+        if (elm('#apply-all-checkbox').checked && searchMatches.length > 0) {
+            searchMatches.each(e => {
+                const object = Main.igz.objects[e.objectIndex]
+                this.updateObjectData(object, input, field, value, id)
+            })
         }
         else {
             this.updateObjectData(this.object, input, field, value, id)
@@ -299,6 +296,7 @@ class ObjectView {
 
         this.object.updated = Object.keys(updated_data[this.object.index] ?? {}).length > 0
         Main.igz.updated = true
+        if (Main.pak) Main.pak.updated = true
 
         Main.updateTitle()
         Main.colorizeMainTree()
@@ -579,62 +577,88 @@ function read_all_types_metadata() {
         const name = view.readStr()
         names.push(name)
     }
-    
+
     // Read types metadata
     while (view.offset < view.buffer.length) {
-        const typeName = view.readStr()
+        const typeName = names[view.readUInt16()]
+        const parent = names[view.readUInt16()]
+        const size = view.readUInt16()
         const fieldCount = view.readUInt16()
+        const fields = []
 
-        const typeObject = []
+        // Add type to hierarchy data
+        function addToHierarchy(type, children = null) {
+            if (!TYPES_HIERARCHY[type]) TYPES_HIERARCHY[type] = { children: new Set() }
+            if (children) children.forEach(e => TYPES_HIERARCHY[type].children.add(e))
+        }
+        addToHierarchy(typeName)
+        addToHierarchy(parent, [typeName])
 
+        // Read fields
         for (let i = 0; i < fieldCount; i++) {
             // Read name and type
             const field = {
                 name: names[view.readUInt16()],
-                type: names[view.readUInt16()]
-            }
-
-            // Read type reference name (if any)
-            if (['igObjectRefMetaField', 'igObjectRefArrayMetaField'].includes(field.type)) {
-                field.metaObject = names[view.readUInt16()]
-            }
-
-            // Read size and offset
-            field.size = view.readUInt16()
-            field.typeSize = view.readUInt16()
-            field.offset = view.readUInt16()
-            field.memType = names[view.readUInt16()]
-            field.static = view.readByte() === 1
-
-            // Read bitfield data
-            if (field.type === 'igBitFieldMetaField') {
-                // Find bitfield parent
-                if (typeObject.length > 0 && typeObject[typeObject.length - 1].type !== 'igBitFieldMetaField') {
-                    typeObject[typeObject.length - 1].bitfieldRoot = true
-                    typeObject[typeObject.length - 1].children = []
-                    field.root = typeObject[typeObject.length - 1]
-                }
-                // Update bitfield children size
-                if (typeObject.length > 0) {
-                    field.size = typeObject[typeObject.length - 1].size
-                    field.typeSize = typeObject[typeObject.length - 1].typeSize
-                    field.root ??= typeObject[typeObject.length - 1].root
-                }
-                field.metaField = names[view.readUInt16()] // Type name if bitfield
-                field.shift = view.readByte()              // Shift in bitfield
-                field.bits = view.readByte()               // Actual size if bitfield
-
-                field.bitfield = true
-                field.root.children.push(field)
+                type: names[view.readUInt16()],
+                offset: view.readUInt16(),
+                size: view.readUInt16(),
+                typeSize: view.readUInt16(),
+                static: view.readByte() === 1
             }
             
-            typeObject.push(field)
+            // Read MetaObject (object reference type)
+            if (field.type === 'igObjectRefMetaField' || field.type === 'igObjectRefArrayMetaField') {
+                field.metaObject = names[view.readUInt16()]
+            }
+            // Read MemType (memory data type)
+            else if (field.type === 'igMemoryRefMetaField') {
+                field.memType = names[view.readUInt16()]
+            }
+            // Read bitfield data
+            else if (field.type === 'igBitFieldMetaField') {
+                field.rootIndex = view.readUInt16()
+                field.metaField = names[view.readUInt16()]
+                field.shift = view.readByte()
+                field.bits = view.readByte()
+            }
+            
+            fields.push(field)
         }
 
-        objects[typeName] = typeObject
+        // Update bitfield data
+        fields.forEach(field => {
+            if (field.type === 'igBitFieldMetaField') {
+                field.root = fields[field.rootIndex]
+                field.root.children ??= []
+                field.root.children.push(field)
+                field.root.bitfieldRoot = true
+                field.size = field.root.size
+                field.typeSize = field.root.typeSize
+                field.bitfield = true
+            }
+        })
+
+        // Remove 0-sized fields, sort by offset and save type metadata
+        objects[typeName] = fields.filter(e => e.type !== 'igStaticMetaField' && e.type !== 'igPropertyFieldMetaField')
+                                  .sort((a, b) => a.offset - b.offset)
     }
 
     return objects
+}
+
+/**
+ * Returns all types that inherit from the provided type.
+ */
+function getAllInheritedChildren(type, all_children = new Set()) {
+    const children = TYPES_HIERARCHY[type].children
+    all_children.add(type)
+
+    for (const child of children) {        
+        if (!all_children.has(child))
+            getAllInheritedChildren(child, all_children)
+    }
+
+    return children
 }
 
 /**

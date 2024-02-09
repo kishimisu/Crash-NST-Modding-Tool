@@ -96,8 +96,6 @@ function createMainWindow() {
                 }, {
                     type: 'separator',
                 }, {
-                    role: 'close'
-                }, {
                     role: 'quit'
                 }
             ]
@@ -149,7 +147,9 @@ function createMainWindow() {
     if (process.env.NODE_ENV === 'development') win.webContents.openDevTools()
 
     win.once('ready-to-show', () => {
-        win.show()
+        win.webContents.once("did-finish-load", () => {
+            win.show()
+        })
     })
 }
 
@@ -181,7 +181,9 @@ function createImportModal(event, props) {
 
     child.once('ready-to-show', () => {
         child.setTitle('Import from ' + props.file_path)
-        child.show()
+        child.webContents.once("did-finish-load", () => {
+            child.show()
+        })
     })
 
     return new Promise((resolve, reject) => {

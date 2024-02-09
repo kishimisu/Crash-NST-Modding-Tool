@@ -483,7 +483,7 @@ class ObjectView {
         // Reset interesting fields on igz change
         if (interesting_fields.igz !== Main.igz) {
             interesting_fields.igz = Main.igz
-            interesting_fields.fields = []
+            interesting_fields.fields = {}
         }
         // Load saved interesting fields
         else if (interesting_fields.fields[this.object.type] != null) {
@@ -509,17 +509,17 @@ class ObjectView {
                 firstValue = allObjects[0].view.readBytes(field.size, field.offset)
             }
 
-            for (let i = 1; i < allObjects.length; i++) {
+            for (let j = 1; j < allObjects.length; j++) {
                 let interesting = false
 
                 if (field.type === 'igBitFieldMetaField') {
-                    const bytes = allObjects[i].view.readInt(field.offset)
+                    const bytes = allObjects[j].view.readInt(field.offset)
                     const value = bitRead(bytes, field.bits, field.shift)
                     if (value !== firstValue) interesting = true
                 }
                 else {
-                    const value = allObjects[i].view.readBytes(field.size, field.offset)
-                    if (value.some((e, i) => e != firstValue[i])) interesting = true
+                    const value = allObjects[j].view.readBytes(field.size, field.offset)
+                    if (value.some((e, k) => e != firstValue[k])) interesting = true
                 }
 
                 if (interesting) {

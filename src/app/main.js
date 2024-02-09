@@ -83,7 +83,12 @@ function createMainWindow() {
                     label: 'Save As',
                     accelerator: 'CmdOrCtrl+Shift+S',
                     click: () => win.webContents.send('menu-save-as'),
-                }, { 
+                }, {
+                    label: 'Save And Launch',
+                    accelerator: 'CmdOrCtrl+L',
+                    click: () => win.webContents.send('menu-save-launch'),
+                },
+                { 
                     label: 'Revert Level',
                     accelerator: 'CmdOrCtrl+Shift+R',
                     click: () => win.webContents.send('menu-revert'),

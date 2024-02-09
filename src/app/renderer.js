@@ -210,12 +210,15 @@ class Main {
 
     // Update window title depending on current file and changes
     static updateTitle() {
+        const pak_path = pak?.path + (pak?.updated ? '*' : '')
+        const title = 'The Apprentice v1.4 - '
+
         if (this.treeMode === 'pak') {
-            document.title = 'The apprentice - ' + pak.path + (pak.updated ? '*' : '')
+            document.title = title + pak_path
         }
         else if (this.treeMode === 'igz') {
-            let title = igz.path + (igz.updated ? '*' : '')
-            document.title = 'The apprentice - ' + (pak == null ? title : pak.path + ' -> ' + title)
+            const igz_path = igz.path + (igz.updated ? '*' : '')
+            document.title = title + (pak == null ? igz_path : pak_path + ' -> ' + igz_path)
         }
     }
 
@@ -379,6 +382,7 @@ function loadPAK(filePath)
         }
         elm('#level-select').value = findLevelName(newPAK.getOriginalArchiveName()) ?? levels[1]
 
+        Main.igz = igz = null
         Main.setPak(newPAK)
         Main.showPAKTree()
         onNodeClick(null, tree.get(0))
@@ -409,23 +413,24 @@ function loadIGZ(filePath)
 }
 
 // Save a .pak or .igz file
-async function saveFile()
+// If filePath is null, open the save as dialog
+async function saveFile(saveAs = false)
 {
     // Save igz from pak
-    if (Main.treeMode == 'igz' && pak != null) {
+    if (Main.treeMode == 'igz' && pak != null && !saveAs) {
         updateIGZWithinPAK()
         return
     }
 
-    const filePath = await ipcRenderer.invoke('save-file', Main.treeMode)
+    let filePath = null
 
-    if (filePath == null) {
-        console.warn('No file selected')
-        return
+    if (saveAs) {
+        filePath = await ipcRenderer.invoke('save-file', Main.treeMode)
+        if (filePath == null) return
     }
 
-    if (Main.treeMode === 'pak') savePAK(filePath)
-    else if (Main.treeMode === 'igz') saveIGZ(filePath)
+    if (Main.treeMode === 'pak') savePAK(filePath ?? pak.path)
+    else if (Main.treeMode === 'igz') saveIGZ(filePath ?? igz.path)
 }
 
 // Save current pak to a .pak file
@@ -444,13 +449,17 @@ function savePAK(filePath)
     pak.path = filePath
     localStorage.setItem('last_file', filePath)
 
-    Main.reloadTree(pak.toNodeTree())
+    // Reload PAK tree
+    if (Main.treeMode === 'pak') {
+        Main.reloadTree(pak.toNodeTree())
 
-    // Update current IGZ preview
-    if (igz != null) {
-        const lastNode = tree.available().find(e => e.type === 'file' && pak.files[e.fileIndex].path === igz.path)
-        onNodeClick(null, lastNode)
+        // Update current IGZ preview
+        if (igz != null) {
+            const lastNode = tree.available().find(e => e.type === 'file' && pak.files[e.fileIndex].path === igz.path)
+            onNodeClick(null, lastNode)
+        }
     }
+    Main.updateTitle()
 
     console.log('Saved ' + filePath)
 }
@@ -597,6 +606,18 @@ function launchGame() {
 
     const cmd = `"${exePath}" -om ${level}/${level.split('/')[1]}`
     exec(cmd)
+}
+
+/**
+ * Saves the current archive then launch the game
+ */
+async function saveAndLaunch() {
+    if (pak == null) return // Can only save and launch from a .pak file
+
+    if (Main.treeMode == 'igz') updateIGZWithinPAK()
+
+    savePAK(pak.path)
+    launchGame()
 }
 
 /**
@@ -877,10 +898,11 @@ ipcRenderer.on('init-import-modal', (event, props) => init_file_import_modal(Mai
  */
 ipcRenderer.on('menu-open'   , (_, props) => loadFile(props))
 ipcRenderer.on('menu-reload' , () => window.location.reload())
-ipcRenderer.on('menu-import' , (_, props) => importToPAK(props))
-ipcRenderer.on('menu-save'   , (_, props) => saveFile(props))
-ipcRenderer.on('menu-save-as', (_, props) => saveFile(props))
-ipcRenderer.on('menu-revert' , (_, props) => revertPakToOriginal(props))
+ipcRenderer.on('menu-import' , () => importToPAK(props))
+ipcRenderer.on('menu-save'   , () => saveFile(false))
+ipcRenderer.on('menu-save-as', () => saveFile(true))
+ipcRenderer.on('menu-save-launch', () => saveAndLaunch())
+ipcRenderer.on('menu-revert' , () => revertPakToOriginal())
 ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
 ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())

@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@electron-forge/publisher-github": "^7.2.0",
+    "buffer-loader": "^0.1.0",
     "electron-progressbar": "^2.1.0",
     "electron-squirrel-startup": "^1.0.0",
     "env-cmd": "^10.1.0",

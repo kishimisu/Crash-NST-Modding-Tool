@@ -21,7 +21,11 @@ module.exports = [
     loader: 'svg-inline-loader'
   },
   {
-    test: /\.(txt|json)$/,
+    test: /\.txt$/,
     loader: 'raw-loader'
+  },
+  {
+    test: /\.metadata$/,
+    loader: 'buffer-loader'
   }
 ];

@@ -37,43 +37,29 @@
         
         <!-- Right Area -->
         <div id="right-area">
-            <!-- Level Selector -->
-            <div id="level-selector">
-                <div>
-                    <select id="level-select"></select>
-                    <button id="launch-game">Launch Level</button>
-                </div>
-                <div>
-                    <span>Use current .pak</span>
-                    <input type="checkbox" id="use-current-pak" checked />
-                </div>
-            </div>
-
-            <!-- Hex viewer -->
+            <!-- Hex Data View -->
             <div id="data-view">
-                <div class="section-title">Object data</div>
+                <div id="object-name">Object data</div>
                 <div id="data-table-ctn">
-                    <table id="data-table"></table>
+                    <table class="data-table" id="data-table"></table>
                 </div>
-                <div id="checkbox-input">
+                <div id="checkbox-input" style="display: none;">
                     <span>Disable Object</span>
                     <input type="checkbox" id="disable-object" />
                 </div>
             </div>
 
-            <!-- Data Types -->
-            <div id="data-types">
-                <div class="section-title">Potential type casts</div>
-                <table id="data-types-table">
-                    <tr>
-                        <th>Type</th>
-                        <th>Value</th>
-                    </tr>
-                </table>
+            <!-- Fields View Header -->
+            <div id="objects-fields-title" style="display: none;">
                 <div id="apply-all">
-                    <label for="apply-all-checkbox">Apply to all search results?</label>
+                    <label for="apply-all-checkbox">Apply changes to all search results?</label>
                     <input type="checkbox" id="apply-all-checkbox" />
                 </div>
+            </div>
+
+            <!-- Fields View -->
+            <div id="object-view-ctn">
+                <table id="object-view"></table>
             </div>
             
             <!-- Struct Viewer -->
@@ -101,6 +87,18 @@
                     </div>
                 </div>
                 <div class="tree-preview"></div>
+            </div>
+        </div>
+
+        <!-- Level Selector -->
+        <div id="level-selector">
+            <div>
+                <button id="launch-game">Launch Level</button>
+                <select id="level-select"></select>
+            </div>
+            <div>
+                <span>Use current .pak</span>
+                <input type="checkbox" id="use-current-pak" checked />
             </div>
         </div>
     </div>

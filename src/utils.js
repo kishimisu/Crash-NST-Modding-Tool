@@ -39,6 +39,7 @@ class BufferView {
     readInt    = (offset) => this.getValue('getInt32', 4, offset)
     readUInt   = (offset) => this.getValue('getUint32', 4, offset)
     readFloat  = (offset) => this.getValue('getFloat32', 4, offset)
+    readInt16  = (offset) => this.getValue('getInt16', 2, offset)
     readUInt16 = (offset) => this.getValue('getUint16', 2, offset)
     readByte   = (offset) => this.getValue('getUint8', 1, offset)
     readBytes  = (size, offset) => new Array(size).fill(0).map((_, i) => this.readByte(i == 0 ? offset : null))
@@ -88,6 +89,17 @@ function intToBytes(int, byteCount = 4) {
     return bytes
 }
 
+function bitReplace(a, b, count, shift) {
+    let m = (1 << count) - 1
+    a = a & ~(m << shift)
+    a = a | ((b & m) << shift)
+    return a
+}
+
+function bitRead(a, count, shift) {
+    return (a >> shift) & ((1 << count) - 1)
+}
+
 function formatSize(number) {
     return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + ' bytes'
 }
@@ -97,5 +109,7 @@ export {
     bytesToUInt,
     bytesToUInt16,
     intToBytes,
+    bitReplace,
+    bitRead,
     formatSize,
 }

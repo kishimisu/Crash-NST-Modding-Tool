@@ -8,7 +8,6 @@ import jsonLang from 'highlight.js/lib/languages/json'
 
 import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
-import { resetDataViewTable, resetDataTypeTable } from './components/igz_view.js'
 import { init_file_import_modal } from './components/import_modal.js'
 import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './utils.js'
 
@@ -17,6 +16,7 @@ import '../../assets/styles/style.css'
 import '../../assets/styles/inspire.css'
 import '../../assets/styles/hljs.css'
 import FileInfos from '../pak/fileInfos.js'
+import ObjectView, { clearUpdatedData } from './components/object_view.js'
 
 hljs.registerLanguage('json', jsonLang)
 
@@ -37,8 +37,6 @@ class Main {
     static pak = null
     static igz = null
     static tree = null
-
-    static updatedBytes = {} // Updated bytes in IGZ file (for hex view coloring)
 
     static setPak(_pak) { this.pak = pak = _pak }
 
@@ -73,8 +71,7 @@ class Main {
         this.updateTitle()
 
         // Reset right panel
-        resetDataViewTable()
-        resetDataTypeTable()
+        this.showObjectDataView(false)
 
         if (igz != null) this.showFileButtons(true)
 
@@ -93,10 +90,9 @@ class Main {
         this.treeMode = 'igz'
         tree.load([]) 
         tree.load(igz.toNodeTree())
-        tree.each(e => e.expand())
+        tree.get(2).expand()
 
-        this.updatedBytes = {}
-
+        clearUpdatedData()
         this.colorizeMainTree()
         this.hideIGZPreview()
         this.setSyntaxHighlightedCode(igz)
@@ -204,6 +200,14 @@ class Main {
         elm('#tree-preview-ctn').style.display = visible ? 'block' : 'none'
     }
 
+    // Show or hide the object data view (data table + field table)
+    static showObjectDataView(visible = false) {
+        elm('#data-table').innerHTML = ''
+        elm('#data-view').style.display = visible ? 'flex' : 'none'
+        elm('#object-view-ctn').style.display = visible ? 'block' : 'none'
+        elm('#objects-fields-title').style.display = visible ? 'block' : 'none'
+    }
+
     // Update window title depending on current file and changes
     static updateTitle() {
         if (this.treeMode === 'pak') {
@@ -284,29 +288,27 @@ function onNodeClick(event, node)
         if (node.type === 'fixup') {
             const fixup = igz.fixups[node.fixup]
             Main.setSyntaxHighlightedCode(fixup)
-            resetDataViewTable()
-            resetDataTypeTable()
+            Main.showObjectDataView(false)
             return
         }
         // Fixup child node
         else if (node.type === 'offset') {
             const fixup = igz.fixups[node.fixup]
             if (fixup && fixup.isEncoded()) {
-                const child = fixup.getCorrespondingObject(node.offset, igz.objects)?.object// igz.objects.find(e => node.offset >= e.offset && node.offset < e.offset + e.size)
-                Main.setSyntaxHighlightedCode(child)
-                child.createDataViewTable(Main)
+                const child = fixup.getCorrespondingObject(node.offset, igz.objects)?.object
+                Main.hideStructView()
+                new ObjectView(Main, child)
             }
             else {
                 Main.hideStructView()
-                resetDataViewTable()
-                resetDataTypeTable()
+                Main.showObjectDataView(false)
             }
         }
         // Object node
         else if (node.type === 'object') {
             const object = igz.objects[node.objectIndex]
-            Main.setSyntaxHighlightedCode(object)
-            object.createDataViewTable(Main)
+            Main.hideStructView()
+            new ObjectView(Main, object)
 
             if (elm('#search').value == '') {
                 elm('#search').value = object.getName()
@@ -460,7 +462,7 @@ function saveIGZ(filePath)
     localStorage.setItem('last_file', filePath)
 
     Main.clearAllNodesUpdatedState()
-    Main.updatedBytes = {}
+    clearUpdatedData()
 
     // TODO: refresh data view
 
@@ -479,7 +481,7 @@ function updateIGZWithinPAK()
     igzFile.updated = true
 
     pak.updated = true
-    Main.updatedBytes = {}
+    clearUpdatedData()
     Main.clearAllNodesUpdatedState()
     Main.updateTitle()
 

@@ -92,6 +92,8 @@ body {
   }
 }
 
+/* Import button */
+
 #pak-actions {
   display: flex; 
   align-items: center;
@@ -119,6 +121,7 @@ body {
   flex-direction: column;
   align-items: end;
   position: absolute; 
+  top: 10px;
   right: 10px; 
   gap: 5px;
 }
@@ -126,6 +129,10 @@ body {
 #level-selector > div {
   display: flex;
   gap: 5px;
+}
+
+#level-select {
+  width: 18px;
 }
 
 select {
@@ -153,7 +160,7 @@ select {
   cursor: default;
 }
 
-/* Data View */
+/* Right Area */
 
 #right-area {
   display: flex;
@@ -161,8 +168,7 @@ select {
   width: 50%;
   border-left: 1px solid white;
   padding-inline: 10px;
-  margin-top: 10px;
-  gap: 10px;
+  margin-top: 20px;
 }
 
 .section-title {
@@ -171,6 +177,10 @@ select {
   text-decoration-thickness: 0.75px;
   text-underline-offset: 2px;
   padding-bottom: 5px;
+}
+
+#object-name {
+  margin-bottom: 5px;
 }
 
 #data-struct {
@@ -200,10 +210,6 @@ code {
   margin-bottom: 5px;
 }
 
-.hex-header {
-  color: rgb(189 255 174)
-}
-
 .hex-offset {
   color: #888;
 }
@@ -213,29 +219,104 @@ code {
 }
 
 .hex-zero {
-  color: #666
+  color: #666;
+  /* filter: saturate(0.15) */
 }
 
-table {
+.hex-vec {
+  color: rgb(240, 170, 41)
+}
+
+.hex-float {
+  color: rgb(145, 255, 253)
+}
+
+.hex-int {
+  color: rgb(149, 255, 145)
+}
+
+.hex-enum {
+  color: #bcff33
+}
+
+.hex-bool {
+  color: rgb(158, 74, 242)
+}
+
+.hex-string {
+  color: rgb(244, 144, 255)
+}
+
+.data-table {
   width: 100%;
   font-family: monospace;
-  font-weight: bold;
-  font-size: 1rem;
+  font-size: .8rem;
   text-align: center;
   cursor: default;
   background: #1c1c1c;
 
   font-family: Chivo;
-  font-weight: 400;
+  font-weight: 200;
   text-wrap: balance;
+}
+
+/* Fields Table */
+
+#object-view-ctn {
+  display: none;
+  width: 100%;
+  height: 100%;
+  margin-bottom: 10px;
+  overflow-y: scroll;
+}
+
+#object-view {
+  table-layout: fixed;
+  font-size: .7rem;
+  width: 100%;
+}
+
+#object-view td {
+  max-width: 100px;
+  width: 50%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#object-view td:nth-child(1) {
+  padding-left: 5px;
+  width: 36%;
+}
+
+#object-view td:nth-child(2) {
+  padding-left: 5px;
+  width: 20%;
+}
+
+.field-view {
+  font-weight: 100;
+}
+
+.field-view input {
+  width: 100%;
+  background: #1c1c1c;
+  color: #fefefe;
+  border: none;
+  box-sizing: border-box;
+  border-bottom: 1px solid #333;
+  text-align: center;
+  margin: 0;
+}
+
+.vec-input {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 tr:nth-child(even) {
   background-color: #333;
-}
-
-tr:hover td {
-  background-color: #111;
 }
 
 td.selected {
@@ -245,22 +326,25 @@ td.selected {
 }
 
 td.hex-updated {
-  background-color: rgba(167 255 140 / 33%)!important;
-  box-sizing: border-box;
+  font-weight: 900;
+  background-color: #8ee43029;
+}
+
+td.hex-flash {
+  animation: flashAnimation 0.5s ease-in-out;
+}
+
+@keyframes flashAnimation {
+  0%, 100% {
+    background-color: #5c5c5c;
+  }
+
+  50% {
+    background-color: rgba(255, 255, 255, 0.5);
+  }
 }
 
 /* Data Type Viewer */
-
-#data-types {
-  width: fit-content;
-  min-width: 50%;
-  display: none;
-}
-
-#data-types td {
-  padding-inline: 10px;
-  line-break: anywhere;
-}
 
 .data-type-select {
   width: 100%;
@@ -268,27 +352,15 @@ td.hex-updated {
   border: none;
   padding: 0;
   margin: 0;
+  text-align: center;
 }
 
 #apply-all {
   display: flex;
-  justify-content: space-between;
-  padding: 5px 10px;
-  font-size: .9rem;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
   color: rgb(255, 240, 145);
-}
-
-::-webkit-scrollbar {
-  width: 12px;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: #333; /* Dark color for the thumb */
-  border-radius: 6px; /* Rounded corners for the thumb */
-}
-
-::-webkit-scrollbar-track {
-  background-color: #222; /* Dark color for the track */
 }
 
 /* Tree Preview */
@@ -341,4 +413,25 @@ td.hex-updated {
   background: #333;
   color: #888;
   cursor: default;
+}
+
+/* Stylize scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #333; /* Dark color for the thumb */
+  border-radius: 6px; /* Rounded corners for the thumb */
+}
+
+::-webkit-scrollbar-track {
+  background-color: #222; /* Dark color for the track */
+}
+
+/* Hide input number arrows */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }

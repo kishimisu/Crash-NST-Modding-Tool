@@ -1,5 +1,4 @@
 import { BufferView } from "../utils.js"
-import { DISABLED_HEADER_SIZE } from "./igz.js"
 
 const igListHeaderSize = 40
 
@@ -21,9 +20,6 @@ class igObject {
 
         this.children = []
         this.references = []
-
-        this.disabled = false
-        this.header = null // Header before disabling the object
     }
 
     isListType() {
@@ -103,8 +99,7 @@ class igObject {
 
     getName() {
         let str = this.type
-        if (this.disabled) str = '[Disabled] ' + str
-        else if (this.typeCount > 0) str += ' ' + this.typeCount
+        if (this.typeCount > 0) str += ' ' + this.typeCount
         if (this.name != '') str += ': ' + this.name
         return str
     }
@@ -116,11 +111,6 @@ class igObject {
 
     save(writer, chunk0_offset) {
         if (this.data.length != this.size) throw new Error('Data size mismatch: ' + this.data.length + ' != ' + this.size)
-
-        if (this.disabled) {
-            this.data.forEach((e, i) => writer.setByte(i < DISABLED_HEADER_SIZE ? 0 : e))
-            return
-        }
 
         if (this.isListType()) {
             this.offset = writer.offset - chunk0_offset

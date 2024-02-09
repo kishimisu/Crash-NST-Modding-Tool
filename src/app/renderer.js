@@ -142,8 +142,6 @@ class Main {
             else if (e.type === 'object') {
                 if (igz.objects[e.objectIndex].updated)
                     e.itree.ref.style.color = '#ffaf36'
-                else if (igz.objects[e.objectIndex].disabled)
-                    e.itree.ref.style.color = '#bababa'
                 else
                     e.itree.ref.style.color = defaultColor
             }
@@ -861,18 +859,6 @@ window.onload = () =>
         Main.restoreTreeExpandedState()
         Main.showIGZPreview(lastIndex)    
         Main.setSyntaxHighlightedCode(pak.files[lastIndex])
-    })
-
-    // (IGZ view) "Disable object" checkbox
-    elm('#disable-object').addEventListener('click', (event) => {
-        const node = tree.lastSelectedNode()
-
-        if (node.type === 'object') {
-            const object = igz.objects[node.objectIndex]
-            igz.setObjectActive(object, !event.target.checked)
-
-            Main.setNodeToUpdated(node, object.getName())
-        }
     })
 
     if (localStorage.getItem('first_launch') == null) {

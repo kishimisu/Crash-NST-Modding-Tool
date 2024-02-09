@@ -7,9 +7,6 @@ import NSTPC from '../../assets/crash/NSTPC.txt'
 
 const IGZ_VERSION      = 10
 const IGZ_SIGNATURE    = 0x49475A01
-const CUSTOM_SIGNATURE = 0xAABBCCDD
-
-const DISABLED_HEADER_SIZE = 12 * 4
 
 class IGZ {
     constructor(igz_data, path) {
@@ -115,24 +112,6 @@ class IGZ {
         this.objectList = this.objects[0]
         this.nameList = this.objects[this.objects.length - 1]
 
-        /// Read custom data ///
-
-        const file_end = this.chunk_infos[1].offset + this.nameList.offset + this.nameList.size
-
-        if (file_end + 4 < reader.buffer.length && reader.readUInt(file_end) == CUSTOM_SIGNATURE) 
-        {
-            // Read disabled states
-            this.objects.forEach(e => e.disabled = reader.readByte() == 0)
-
-            // Update header for disabled objects
-            this.objects.filter(e => e.disabled).forEach(e => {
-                const header_size = Math.min(e.view.buffer.length, DISABLED_HEADER_SIZE)
-                e.header = new Uint8Array(reader.readBytes(DISABLED_HEADER_SIZE))
-                e.view.setBytes(e.header.slice(0, header_size), 0)
-            })
-            console.log('Custom igz detected !')
-        }
-
         /// Read object types ///
 
         for (const object of this.objects) {
@@ -229,8 +208,7 @@ class IGZ {
         this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
         this.chunk_infos[1].size = this.objects.reduce((a, b) => a + b.size, 0)
 
-        const customDataSize = 4 + this.objects.length + this.objects.filter(e => e.disabled).length * DISABLED_HEADER_SIZE
-        const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0) + customDataSize
+        const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0)
 
         // Write full header
         const buffer = new Uint8Array(this.header.concat(new Array(fileSize - this.header.length).fill(0)))
@@ -250,15 +228,6 @@ class IGZ {
         this.objects.forEach(e => {
             if (writer.offset - objects_start != e.offset) throw new Error('Offset mismatch: ' + (writer.offset - objects_start) + ' != ' + e.offset)
             e.save(writer, objects_start)
-        })
-
-        // Save disabled states
-        writer.setInt(CUSTOM_SIGNATURE)
-        this.objects.forEach(e => {
-            writer.setByte(e.disabled ? 0 : 1)
-        })
-        this.objects.filter(e => e.disabled).forEach(e => {
-            writer.setBytes(e.header)
         })
 
         this.updated = false
@@ -396,7 +365,7 @@ class IGZ {
         }
         const rofs = []
 
-        for (const entry of this.objects.filter(e => !e.disabled)) {
+        for (const entry of this.objects) {
             const offsets = entry.children
                             .filter(e => entry.type == 'igObjectList')
                             .map(e => e.offset)
@@ -427,22 +396,6 @@ class IGZ {
         }
 
         return rstt
-    }
-
-    /**
-     * Enable or disable an object from being loaded.
-     * @param {igObject} object The object to enable or disable 
-     * @param {boolean} active If false, disables the object. If true, enables the object
-     */
-    setObjectActive(object, active = true) {
-        // Save header
-        const header_size = Math.min(object.size, DISABLED_HEADER_SIZE)
-        object.header = new Uint8Array(DISABLED_HEADER_SIZE)
-        object.header.set(object.view.readBytes(header_size, 0))
-
-        object.disabled = !active
-        object.updated = true
-        this.updated = true
     }
 
     /**
@@ -480,4 +433,3 @@ class IGZ {
 }
 
 export default IGZ
-export { DISABLED_HEADER_SIZE }

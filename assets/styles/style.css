@@ -315,6 +315,15 @@ code {
   gap: 2px;
 }
 
+.ref-list {
+  margin: 10px 0;
+}
+
+.ref-list p {
+  font-weight: 100;
+  margin: 2px;
+}
+
 tr:nth-child(even) {
   background-color: #333;
 }

@@ -136,6 +136,13 @@ class ObjectView {
         for (const field of this.fields) {
             this.createField(this.object, field)
         }
+
+        // Add object's references to the bottom of the field list
+        const refs = this.object.references.filter(e => e.index !== 0).map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
+        const div = document.createElement('div')
+        div.className = 'ref-list'
+        div.innerHTML = `References: (${refs.length}) ` + refs.join('</p>') + '</p>'
+        this.container.appendChild(div)
     }
 
     // Create a row containing info about a field

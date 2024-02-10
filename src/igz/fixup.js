@@ -7,7 +7,8 @@ const bytesFixups   = [ 'RVTB', 'RSTT', 'ROFS', 'RPID', 'RHND', 'RNEX', 'REXT', 
 const allFixups     = [ ...stringFixups, ...intPairFixups, ...intFixups, ...bytesFixups ]
 
 class Fixup {
-    constructor(type, size, header_size, item_count, data) {
+    constructor(igz, type, size, header_size, item_count, data) {
+        this.igz = igz
         this.type = type                   // Fixup type
         this.encoded = this.isEncoded()    // Is encoded ?
         this.size = size                   // Size of header + data
@@ -22,7 +23,7 @@ class Fixup {
     }
 
     // Read fixup content from a BufferView
-    static fromBuffer(reader) {
+    static fromBuffer(igz, reader) {
         // Get fixup type
         const typeBytes  = reader.readBytes(4)
         const type = String.fromCharCode(...typeBytes)
@@ -37,7 +38,7 @@ class Fixup {
         // Get data from beginning of header to end of fixup
         const data = reader.readBytes(fixupSize, reader.offset - 16)
 
-        return new Fixup(type, fixupSize, headerSize, itemCount, data)
+        return new Fixup(igz, type, fixupSize, headerSize, itemCount, data)
     }
 
     // Extract data from fixup
@@ -123,16 +124,17 @@ class Fixup {
 
     // Get the object corresponding to an offset
     getCorrespondingObject(offset, objects) {
-        const object = objects.find(e => offset >= e.offset && offset < e.offset + e.size)
+        const global_offset = this.igz.getGlobalOffset(offset)
+        const object = objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size)
 
         if (object == null) {
-            console.log('No object found for offset', offset, this.type, this.data.indexOf(offset))
+            console.log('No object found for offset', offset, global_offset, this.type, this.data.indexOf(offset))
             return { object: null, offset: NaN }
         }
 
         return {
             object,
-            offset: offset - object.offset // relative offset
+            offset: global_offset - object.global_offset // relative offset
         }
     }
 
@@ -175,7 +177,7 @@ class Fixup {
     toString() {
         return {
             ...this,
-            rawData: this.rawData.length,
+            igz: undefined,
         }
     }
 }

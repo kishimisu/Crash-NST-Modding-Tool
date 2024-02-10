@@ -255,7 +255,8 @@ class ObjectView {
         }
         else if (type == 'igObjectRefMetaField') {
             const offset = object.view.readUInt(field.offset)
-            const refOjbect = offset > 0 ? Main.igz.objects.find(e => offset >= e.offset && offset < e.offset + e.size) : null
+            const global_offset = Main.igz.getGlobalOffset(offset)
+            const refOjbect = offset > 0 ? Main.igz.objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size) : null
             const inheritedClasses = getAllInheritedChildren(field.metaObject)
             inheritedClasses.add(field.metaObject)
             const names = Main.igz.objects.filter(e => inheritedClasses.has(e.type)).map(e => e.getDisplayName())
@@ -272,9 +273,9 @@ class ObjectView {
         }
         else if (type == 'igMemoryRefMetaField') {
             const elementSize = object.view.readUInt(field.offset)
-            const offset = object.view.readUInt(field.offset + 8 )
+            const offset = object.view.readUInt(field.offset + 8)
             input = document.createElement('div')
-            input.innerText = `Offset: ${offset} | Elm. Size: ${elementSize}`
+            input.innerText = `Offset: ${Main.igz.getGlobalOffset(offset)} | Elm. Size: ${elementSize}`
         }
         else {
             input = createNumberInput('readInt')

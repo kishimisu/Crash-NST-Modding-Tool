@@ -17,9 +17,8 @@ class IGZ {
         this.fixups = {}
         this.objects = []
 
-        this.objectList = null // objects[0]
-        this.nameList = null   // objects[-1]
-
+        this.objectList = null // igObjectList (this.objects[0])
+        this.nameList = null   // igNameList
         this.initialize(new Uint8Array(igz_data))
     }
 
@@ -70,7 +69,7 @@ class IGZ {
         reader.seek(this.chunk_infos[0].offset)
 
         while (true) {
-            const fixup = Fixup.fromBuffer(reader)
+            const fixup = Fixup.fromBuffer(this, reader)
             if (fixup == null) break
 
             this.fixups[fixup.type] = fixup
@@ -92,25 +91,22 @@ class IGZ {
 
         /// Objects (Chunk 1) ///
 
-        const rvtb = this.fixups.RVTB.data
-        const sorted_offsets = rvtb.concat(this.chunk_infos[1].size).sort((a, b) => a - b)
+        const global_offsets = this.fixups.RVTB.data.map(offset => this.getGlobalOffset(offset))
 
-        for (const [index, offset] of Object.entries(rvtb)) {
-            const sortedID = sorted_offsets.indexOf(offset)
-            const nextOffset = sorted_offsets[sortedID + 1]
-            const size = nextOffset - offset
+        for (let i = 0; i < global_offsets.length; i++) {
+            const global_offset = global_offsets[i]
+            const size = (global_offsets[i + 1] ?? buffer.length) - global_offset
 
-            const dataOffset = this.chunk_infos[1].offset + offset
+            const rvtb_offset = this.fixups.RVTB.data[i]
+            const relative_offset = rvtb_offset & 0x7ffffff
+            const chunk_info = this.chunk_infos[(rvtb_offset >> 0x1b) + 1]
+            const data = reader.readBytes(size, global_offset)
 
-            if (dataOffset > reader.buffer.length) continue // Special case for Vertex igz files (not handled)
-
-            const data = reader.readBytes(size, dataOffset)
-
-            this.objects.push(new igObject({ index, offset, size, data }))
+            this.objects.push(new igObject({ 
+                index: i, offset: relative_offset, 
+                global_offset, chunk_info, size, data 
+            }))
         }
-
-        this.objectList = this.objects[0]
-        this.nameList = this.objects[this.objects.length - 1]
 
         /// Read object types ///
 
@@ -123,6 +119,9 @@ class IGZ {
             object.type = type
             object.typeID = typeID
         }
+
+        this.objectList = this.objects[0]
+        this.nameList = this.objects.find(e => e.type == 'igNameList')
 
         /// Read root objects names ///
 
@@ -153,61 +152,32 @@ class IGZ {
 
         /// Get children + references ///
 
-        this.updateChildrenAndReferences = () => {
-            for (const object of this.objects) {
-                object.children = []
-                object.references = []
-            }
+        const rofs = this.fixups.ROFS.data
 
-            for (const object of this.objects) {
-                if (object.type == 'igStreamingChunkInfo') continue
-                for (let k = 0; k < object.size; k += 4) {
-                    const value = object.view.readInt(k)
-                    if (value == 0) continue
+        for (const offset of rofs) {
+            const global_offset = this.getGlobalOffset(offset & 0xfbffffff)
+            const object = this.objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size)
+            
+            const relative_offset = global_offset - object.global_offset
+            const value = object.view.readInt(relative_offset)
 
-                    const child = this.objects.find(e => e.offset == value)
-
-                    if (child != null) {
-                        child.references.push(object)
-                        object.children.push({ object: child, offset: k })
-                    }
+            const child_global_offset = this.getGlobalOffset(value)
+            const child = this.objects.find(e => child_global_offset >= e.global_offset && child_global_offset < e.global_offset + e.size)
+            
+            if (object !== child && child != null) {
+                if (!object.children.some(e => e.object == child)) {
+                    object.children.push({ object: child, offset: relative_offset })
+                }
+                if (!child.references.some(e => e == object)) {
+                    child.references.push(object)
                 }
             }
+            else if (child == null) console.warn('No object found for offset', offset, global_offset, object.getName(), value)
         }
-        this.updateChildrenAndReferences()
     }
 
     save(filePath) {
-        // Update start offsets
-        const sorted_objects = this.objects.sort((a, b) => a.offset - b.offset)
-        for (let i = 1; i < sorted_objects.length; i++) {
-            const object = sorted_objects[i]
-            const prevEndOffset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
-
-            if (object.offset != prevEndOffset) {
-                // console.log('Updated START offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + (object.offset - prevEndOffset) + ')')
-                object.offset = prevEndOffset
-            }
-        }
-
-        // Update igObjectList + igNameList
-        const namedObjects = this.objectList.getList().map(off => this.objects.find(e => e.offset == off)).filter(e => e != null)
-        this.objectList.updateList(namedObjects.map(e => e.offset))
-        this.nameList.updateList(namedObjects.map(e => this.fixups.TSTR.data.indexOf(e.name)))
-
-        // Update fixups
-        if (this.path.includes('_pkg')) {
-            this.fixups.RVTB.updateData(this.buildRVTB())
-            this.fixups.ONAM.updateData(this.buildONAM())
-            this.fixups.ROFS.updateData(this.buildROFS())
-            this.fixups.RSTT.updateData(this.buildRSTT())
-        }
-
-        // Update chunk infos
-        this.chunk_infos[0].size = Object.values(this.fixups).reduce((a, b) => a + b.size, 0)
-        this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
-        this.chunk_infos[1].size = this.objects.reduce((a, b) => a + b.size, 0)
-
+        // Calculate file size
         const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0)
 
         // Write full header
@@ -226,7 +196,7 @@ class IGZ {
         const objects_start = this.chunk_infos[1].offset
         writer.seek(objects_start)
         this.objects.forEach(e => {
-            if (writer.offset - objects_start != e.offset) throw new Error('Offset mismatch: ' + (writer.offset - objects_start) + ' != ' + e.offset)
+            if (writer.offset - objects_start != e.offset) console.warn('Offset mismatch: ' + (writer.offset - objects_start) + ' != ' + e.offset)
             e.save(writer, objects_start)
         })
 
@@ -330,7 +300,7 @@ class IGZ {
         // Update TSTR
         this.fixups.TSTR.updateData(new_TSTR)
 
-        // Build new chunk_info data
+        // Build new igStreamingChunkInfo data
         const chunk_info_data = []
         for (let i = 0; i < files.length; i++) {
             const file_path = files[i]
@@ -342,9 +312,37 @@ class IGZ {
             chunk_info_data.push([file_type_id, file_path_id])
         }
 
-        // Update chunk_info
+        // Update igStreamingChunkInfo object
         const chunk_info = this.objects[1]
         chunk_info.updatePKG(chunk_info_data)
+
+        // Update objects offsets
+        const sorted_objects = this.objects.sort((a, b) => a.offset - b.offset)
+        for (let i = 1; i < sorted_objects.length; i++) {
+            const object = sorted_objects[i]
+            const prevEndOffset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
+
+            if (object.offset != prevEndOffset) {
+                console.log('Updated start offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + (prevEndOffset - object.offset) + ')')
+                object.offset = prevEndOffset
+            }
+        }
+
+        // Update igObjectList + igNameList
+        const namedObjects = this.objectList.getList().map(off => this.objects.find(e => e.offset == off)).filter(e => e != null)
+        this.objectList.updateList(namedObjects.map(e => e.offset))
+        this.nameList.updateList(namedObjects.map(e => this.fixups.TSTR.data.indexOf(e.name)))
+
+        // Update fixups
+        this.fixups.RVTB.updateData(this.buildRVTB())
+        this.fixups.ONAM.updateData(this.buildONAM())
+        this.fixups.ROFS.updateData(this.buildROFS())
+        this.fixups.RSTT.updateData(this.buildRSTT())
+
+        // Update chunk infos
+        this.chunk_infos[0].size = Object.values(this.fixups).reduce((a, b) => a + b.size, 0)
+        this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
+        this.chunk_infos[1].size = this.objects.reduce((a, b) => a + b.size, 0)
 
         return this.save()
     }
@@ -396,6 +394,10 @@ class IGZ {
         }
 
         return rstt
+    }
+
+    getGlobalOffset(offset) {
+        return (offset & 0x7ffffff) + this.chunk_infos[(offset >> 0x1b) + 1].offset
     }
 
     /**

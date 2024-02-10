@@ -3,9 +3,11 @@ import { BufferView } from "../utils.js"
 const igListHeaderSize = 40
 
 class igObject {
-    constructor({index, offset, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = []}) {
+    constructor({index, offset, global_offset, chunk_info, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = []}) {
         this.index = parseInt(index) // Order of appearance in RVTB fixup
-        this.offset = offset    // Offset in chunk 1
+        this.offset = offset               // Offset relative to chunk 1
+        this.global_offset = global_offset // Offset relative to file start
+        this.chunk_info = chunk_info       // Corresponding chunk info reference
 
         this.type = type        // Type (string)
         this.typeID = typeID    // Type ID in TMET fixup
@@ -118,13 +120,8 @@ class igObject {
             this.view.setInt(new_offset, 32)
         }
 
-        // Update references count
-        // this.view.setInt(this.references.length, 8)
-
         for (let k = 0; k < this.size; k += 4) {
-            const child = this.children.find(e => e.offset == k)
-            // Update children pointers (not for list types as it's handled manually), or get next value
-            const value = child && !this.isListType() ? child.object.offset : this.view.readInt(k)
+            const value = this.view.readInt(k)
             writer.setInt(value)
         }
     }

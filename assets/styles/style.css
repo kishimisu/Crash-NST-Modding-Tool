@@ -309,6 +309,12 @@ code {
   margin: 0;
 }
 
+.field-view input, select {
+  font-size: .75rem;
+  font-family: Chivo;
+  font-weight: 200;
+}
+
 .vec-input {
   display: flex;
   align-items: center;

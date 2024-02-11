@@ -118,17 +118,6 @@ class ObjectView {
                 if (updated) cell.classList.add('hex-updated')
                 if (colorType && (!zero || updated)) cell.classList.add(colorType)
             }
-
-            // Remove text from cells that are not associated with a field
-            if (i > 0 && i < this.fields.length - 1 && !this.fields[i-1].bitfield) {
-                const nextOffset = this.fields[i+1].offset
-                const empty = nextOffset - (field.offset + field.size)
-                
-                for (let i = 0; i < Math.floor(empty/4); i++) {
-                    const cell = this.hexCells[Math.floor(field.offset / 4) + Math.ceil(field.size / 4) + i].element
-                    cell.innerText = ''
-                }
-            }
         }
     }
 
@@ -142,12 +131,93 @@ class ObjectView {
             this.createField(this.object, field)
         }
 
+        this.createAdditionalFields()
+
         // Add object's references to the bottom of the field list
         const refs = this.object.references.filter(e => e.index !== 0).map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
         const div = document.createElement('div')
         div.className = 'ref-list'
         div.innerHTML = `References: (${refs.length}) ` + refs.join('</p>') + '</p>'
         this.container.appendChild(div)
+    }
+
+    // Create fields for elements of array-typed objects
+    createAdditionalFields() {
+        // igComponentDataTable, CEntityTagSet
+        if (this.fields.length >= 2 && this.fields[0].type == 'igMemoryRefMetaField' && this.fields[1].type == 'igMemoryRefMetaField') {
+            // Get array infos
+            const valuesElmSize = this.object.view.readUInt(this.fields[0].offset)
+            const valuesOffset  = this.object.view.readUInt(this.fields[0].offset + 8)
+            const keysElmSize   = this.object.view.readUInt(this.fields[1].offset)
+            const keysOffset    = this.object.view.readUInt(this.fields[1].offset + 8)
+            const itemCount     = this.object.view.readUInt(this.fields[2].offset)
+            const valuesType    = this.fields[0].memType
+            const keysType      = this.fields[1].memType
+
+            // Find objects containing keys and values
+            const valuesObject  = Main.igz.findObject(valuesOffset)
+            const keysObject    = Main.igz.findObject(keysOffset)
+
+            const relativeKeysOffset   = Main.igz.getGlobalOffset(keysOffset) - keysObject.global_offset
+            const relativeValuesOffset = Main.igz.getGlobalOffset(valuesOffset) - valuesObject.global_offset
+            const valueElmSize = Math.min(valuesElmSize, 8)
+            const keyElmSize   = 8 // keysElmSize
+
+            // console.log( { valuesElmSize, valuesOffset, keysElmSize, keysOffset, itemCount, valuesType, keysType })
+
+            let i = 0, additionalFields = 0
+
+            while(additionalFields < itemCount) {
+                const key   = keysObject.view.readUInt(relativeKeysOffset + i * keyElmSize)
+                const value = valuesObject.view.readUInt(relativeValuesOffset + i * valueElmSize)
+
+                if (key == 0 && value == 0) {
+                    i++
+                    continue
+                }
+
+                const string = Main.igz.fixups.TSTR.data[key]
+                
+                const field = {
+                    name: `#${additionalFields} ${keysType == 'igStringMetaField' ? string : keysType}`,
+                    type: valuesType,
+                    offset: relativeValuesOffset + i * valueElmSize,
+                    size: valueElmSize,
+                }
+
+                i++
+                additionalFields++
+                this.fields.push(field)
+                this.createField(this.object, field)
+            }
+        }
+        // CAudioArchiveHandleList
+        else if (this.fields.length >= 3 && this.fields[0].name == '_count' && this.fields[1].name == '_capacity' && this.fields[2].type == 'igMemoryRefMetaField') {
+            const count         = this.object.view.readUInt(this.fields[0].offset)
+            const capacity      = this.object.view.readUInt(this.fields[1].offset)
+            const valuesElmSize = this.object.view.readUInt(this.fields[2].offset)
+            const valuesOffset  = this.object.view.readUInt(this.fields[2].offset + 8)
+            const valuesType    = this.fields[2].memType
+
+            if (count != capacity) console.warn('MemoryRefMetaField count and capacity are different:', count, capacity)
+
+            const valuesObject = Main.igz.findObject(valuesOffset)
+            const relativeValuesOffset = Main.igz.getGlobalOffset(valuesOffset) - valuesObject.global_offset
+
+            // console.log({ count, capacity, valuesElmSize, valuesOffset, valuesType })
+
+            for (let i = 0; i < count; i++) {
+                const field = {
+                    name: `Item #${i}`,
+                    type: valuesType,
+                    offset: relativeValuesOffset + i * 8,
+                    size: 8,
+                }
+
+                this.fields.push(field)
+                this.createField(this.object, field)
+            }
+        }
     }
 
     // Create a row containing info about a field
@@ -180,6 +250,25 @@ class ObjectView {
 
         // Field data (input field)
         const data = this.createInputFieldValue(object, field)
+
+        // Focus the start of the data when clicking on a Memory field
+        if (field.type === 'igMemoryRefMetaField') {
+            tr.addEventListener('click', () => {
+                const offset = Main.igz.getGlobalOffset(object.view.readUInt(field.offset + 8))
+                const refOjbect = Main.igz.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
+
+                // Focus in hex view
+                const view = new ObjectView(refOjbect)
+                const refCell = view.hexCells.find(e => e.offset === offset - refOjbect.global_offset)
+                view.setSelected(refCell.fields[0], refCell)
+                view.onCellHover(refCell, true)
+
+                // Focus in tree view
+                const refNode = Main.tree.available().find(e => e.objectIndex == refOjbect.index)
+                refNode?.expandParents()
+                refNode?.select()
+            })
+        }
 
         // Add new row to table
         tr.addEventListener('contextmenu', (e) => this.createContextMenu(e, field))
@@ -266,9 +355,8 @@ class ObjectView {
             const offset = object.view.readUInt(field.offset)
             const global_offset = Main.igz.getGlobalOffset(offset)
             const refOjbect = offset > 0 ? Main.igz.objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size) : null
-            const inheritedClasses = getAllInheritedChildren(field.metaObject)
-            inheritedClasses.add(field.metaObject)
-            const names = Main.igz.objects.filter(e => inheritedClasses.has(e.type)).map(e => e.getDisplayName())
+            const inheritedClasses = getAllInheritedChildren(field.metaObject).add(field.metaObject)
+            const names = Main.igz.objects.filter(e => !field.metaObject || inheritedClasses.has(e.type)).map(e => e.getDisplayName())
             input = createDropdownInput(names, refOjbect?.getDisplayName())
         }
         else if (type == 'igBitFieldMetaField') {
@@ -282,9 +370,9 @@ class ObjectView {
         }
         else if (type == 'igMemoryRefMetaField') {
             const elementSize = object.view.readUInt(field.offset)
-            const offset = object.view.readUInt(field.offset + 8)
+            // const offset = object.view.readUInt(field.offset + 8)
             input = document.createElement('div')
-            input.innerText = `Offset: ${Main.igz.getGlobalOffset(offset)} | Elm. Size: ${elementSize}`
+            input.innerText = `Type: ${this.prettifyType(field.memType)} | Elm. Size: ${elementSize}`
         }
         else {
             input = createNumberInput('readInt')
@@ -478,7 +566,7 @@ class ObjectView {
     // Sets the currently selected field and cell
     setSelected(field, cell) {
         // Reset selection if clicked on the same field/cell
-        this.selected = this.selected?.field === field || this.selected?.cell === cell ? null : { field, cell }
+        this.selected = this.selected != null && (this.selected.field === field || this.selected.cell === cell) ? null : { field, cell }
 
         // Update hex cells
         this.hexCells.forEach(e => {
@@ -502,7 +590,7 @@ class ObjectView {
         field.hexCells[0].element.parentNode.scrollIntoViewIfNeeded()
     }
 
-    onCellHover(cell) {
+    onCellHover(cell, forceSelect = false) {
         // Update field list
         this.fields.forEach(e => {
             e.element.style.backgroundColor = e.hexCells.includes(cell) ? '#5c5c5c' : ''
@@ -515,6 +603,8 @@ class ObjectView {
             cell.fields[0].element.scrollIntoViewIfNeeded()
             cellsToHighlight = cell.fields[0].hexCells
         }
+        if (cellsToHighlight.length === 0 && forceSelect) cellsToHighlight = [cell]
+
         this.hexCells.forEach(e => {
             e.element.style.backgroundColor = cellsToHighlight.includes(e) ? '#5c5c5c' : ''
         })
@@ -707,7 +797,7 @@ class ObjectView {
     }
 
     prettifyType(field) {
-        let type = field.metaObject ?? field.metaField ?? field.type
+        let type = typeof(field) == 'string' ? field : field.metaObject ?? field.metaField ?? field.type
 
         if (type.startsWith('ig')) type = type.slice(2)
         if (type.endsWith('MetaField')) type = type.slice(0, -9)
@@ -807,6 +897,7 @@ function read_all_types_metadata() {
  * Returns all types that inherit from the provided type.
  */
 function getAllInheritedChildren(type, all_children = new Set()) {
+    if (type == null) return all_children
     const children = TYPES_HIERARCHY[type].children
     all_children.add(type)
 

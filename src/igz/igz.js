@@ -396,6 +396,27 @@ class IGZ {
         return rstt
     }
 
+    /**
+     * Find the object that contains the given offset
+     * 
+     * @param {int} offset - The offset to search for
+     * @param {boolean} global_offset - If true, search against global offsets instead of relative offsets
+     * @returns {igObject} The object that contains the given offset
+     */
+    findObject(offset, global_offset = true) {
+        if (global_offset) {
+            offset = this.getGlobalOffset(offset)
+            return this.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
+        }
+        return this.objects.find(e => offset >= e.offset && offset < e.offset + e.size)
+    }
+
+    /**
+     * Converts an encoded offset into a global offset
+     * 
+     * @param {int} offset - The offset to convert
+     * @returns {int} The offset relative to the start of the file
+     */
     getGlobalOffset(offset) {
         return (offset & 0x7ffffff) + this.chunk_infos[(offset >> 0x1b) + 1].offset
     }

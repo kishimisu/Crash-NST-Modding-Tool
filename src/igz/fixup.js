@@ -138,12 +138,9 @@ class Fixup {
         }
     }
 
-    toNodeTree(objects) {
-        return {
-            text: `${this.type} (${this.item_count})`,
-            type: 'fixup',
-            fixup: this.type,
-            children: this.data.map((e, i) => {
+    toNodeTree(objects, childrenOnly = false) {
+        if (childrenOnly) {
+            return this.data.map((e, i) => {
                 let text = i + ': '
 
                 if (this.encoded || this.type == 'ONAM') {
@@ -163,6 +160,13 @@ class Fixup {
                     offset: e 
                 }
             })
+        }
+
+        return {
+            text: `${this.type} (${this.item_count})`,
+            type: 'fixup',
+            fixup: this.type,
+            children: this.data.length > 0
         }
     }
 

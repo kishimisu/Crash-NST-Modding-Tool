@@ -8,6 +8,9 @@ import jsonLang from 'highlight.js/lib/languages/json'
 
 import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
+import FileInfos from '../pak/fileInfos.js'
+import ObjectView, { clearUpdatedData } from './components/object_view.js'
+import PakModifiers from './components/utils/modifier.js'
 import { init_file_import_modal } from './components/import_modal.js'
 import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
 
@@ -15,9 +18,6 @@ import levels from '../../assets/crash/levels.txt'
 import '../../assets/styles/style.css'
 import '../../assets/styles/inspire.css'
 import '../../assets/styles/hljs.css'
-import FileInfos from '../pak/fileInfos.js'
-import ObjectView, { clearUpdatedData } from './components/object_view.js'
-import PakModifiers from './components/utils/modifier.js'
 
 hljs.registerLanguage('json', jsonLang)
 
@@ -168,8 +168,8 @@ class Main {
         }
 
         this.igz = igz
-
-        treePreview.load(igz.toNodeTree())
+        
+        treePreview.load(igz.toNodeTree(false))
         treePreview.get(2).expand()
     }
 
@@ -317,6 +317,26 @@ function onNodeClick(event, node)
             }
         }
     }
+}
+
+/**
+ * Generates children for an asynchronous node when it is expanded
+ */
+function onNodeLoadChildren(node, resolve) {
+    if (node == null) return
+
+    let children = []
+
+    if (node.type == 'object') {
+        const object = igz.objects[node.objectIndex]
+        children = object.children.map(e => e.object.toNodeTree(false))
+    }
+    else if (node.type == 'fixup') {
+        const fixup = igz.fixups[node.fixup]
+        children = fixup.toNodeTree(igz.objects, true)
+    }
+
+    resolve(children)
 }
 
 /**
@@ -715,13 +735,24 @@ async function changeGameFolderPath() {
  */
 window.onload = () => 
 {
-    treePreview = Main.createTree('.tree-preview')
+    // Create preiew tree (right)
+    treePreview = Main.createTree('.tree-preview', { 
+        data: onNodeLoadChildren 
+    })
 
     // Stop now if not main window
     if (!window.process.argv.includes('main_window')) return
 
-    // Create main tree
-    Main.createMainTree({ editable: true, editing: { add: false, edit: true, remove: false }})
+    // Create main tree (left)
+    Main.createMainTree({
+        data: onNodeLoadChildren,
+        editable: true, 
+        editing: {
+             add: false, 
+             edit: true, 
+             remove: false 
+        }
+    })
 
     // Main tree nodes click event
     tree.on('node.click', onNodeClick)

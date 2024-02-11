@@ -430,16 +430,25 @@ class IGZ {
         return this.objects.filter(e => e.nameID != -1 && e.references.length == 1)
     }
 
-    toNodeTree() {
+    toNodeTree(recursive = true) {
+        const unreferenced = this.objects.filter(e => e.references.length == 0)
+        let root = this.getRootObjects()
+        let rootText = 'Root Objects'
+
+        if (this.objects.length > 0 && root.length == 0) {
+            root = this.objects.filter(e => !unreferenced.includes(e))
+            rootText = 'All Objects'
+        }
+
         return [{
             text: 'Fixups',
             children: Object.values(this.fixups).map(e => e.toNodeTree(this.objects)),
         }, {
             text: 'Unreferenced objects',
-            children: this.objects.filter(e => e.references.length == 0).map(e => e.toNodeTree())
+            children: unreferenced.map(e => e.toNodeTree())
         }, {
-            text: 'Root Objects',
-            children: this.getRootObjects().map(e => e.toNodeTree()),
+            text: rootText,
+            children: root.map(e => e.toNodeTree(recursive)),
         }]
     }
 

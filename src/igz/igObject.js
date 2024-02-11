@@ -138,20 +138,25 @@ class igObject {
         }
     }
 
-    toNodeTree(parentObjects = []) {
+    toNodeTree(recursive = true, parentObjects = []) {
         if (parentObjects.includes(this.index)) {
             return { 
                 text: '[Recursion] ' + this.getName(), 
             }
         }
-        
         parentObjects.push(this.index)
+
+        let children = this.children.length > 0
+
+        if (children && recursive) {
+            children = this.index == 0 ? null : this.children.map(e => e.object.toNodeTree(true, parentObjects.slice()))
+        }
 
         return {
             type: 'object',
             objectIndex: this.index,
             text: this.getName(),
-            children: this.index > 0 && this.children.length > 0 ? this.children.map(e => e.object.toNodeTree(parentObjects.slice())) : null,
+            children
         }
     }
 }

@@ -255,7 +255,18 @@ function showSaveFileDialog(event, extension = 'pak') {
  * @param {*} current_file Number of files written so far
  * @param {*} file_count Total files to write
  */
-function setProgressBar(event, file_path, current_file, file_count, message) {
+function setProgressBar(event, file_path, current_file, file_count, message) {   
+    // reset progress bar
+    if (file_path == null) {
+        if (progressBar != null) {
+            progressBar.setCompleted()
+            progressBar = null
+        }
+        win.setProgressBar(0)
+        return
+    }
+
+    // create progress bar
     if (progressBar == null) {
         progressBar = new ProgressBar({
             title: 'Saving to ' + file_path + '...',

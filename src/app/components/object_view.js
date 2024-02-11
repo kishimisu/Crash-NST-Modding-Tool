@@ -1,6 +1,7 @@
 import types_metadata from '../../../assets/crash/types.metadata'
 import { BufferView, bitRead, bitReplace } from '../../utils'
-import { elm } from "../utils"
+import { saveTemporaryAndLaunch } from '../renderer'
+import { elm } from "./utils/utils"
 
 // Process types metadata and hierarchy from file
 const TYPES_HIERARCHY = {}
@@ -107,8 +108,12 @@ class ObjectView {
             // Colorize corresponding data cells
             for (let j = 0; j < Math.ceil(field.size / 4); j++) {
                 const cell = this.hexCells[Math.floor(field.offset / 4) + j].element
+
+                if (field.type === 'igEnumMetaField' && cell.innerText.replaceAll(' ', '') == 'FFFFFFFF') 
+                    cell.classList.add('hex-zero')
+
                 const zero = cell.classList.contains('hex-zero')
-                const updated = childrenUpdated || this.isFieldUpdated(field)
+                const updated = childrenUpdated || this.isFieldUpdated(field, j)
                 
                 if (updated) cell.classList.add('hex-updated')
                 if (colorType && (!zero || updated)) cell.classList.add(colorType)
@@ -177,6 +182,7 @@ class ObjectView {
         const data = this.createInputFieldValue(object, field)
 
         // Add new row to table
+        tr.addEventListener('contextmenu', (e) => this.createContextMenu(e, field))
         tr.addEventListener('mouseover', () => this.onFieldHover(field))
         tr.appendChild(name)
         tr.appendChild(type)
@@ -209,7 +215,7 @@ class ObjectView {
             const input = document.createElement('input')
             input.type = 'checkbox'
             input.checked = value == 1
-            input.onchange = () => this.onFieldUpdate(input, field, input.checked)
+            input.onchange = () => this.onFieldUpdate(field, input.checked)
             return input
         }
 
@@ -232,16 +238,19 @@ class ObjectView {
             const value = object.view.readByte(field.offset)
             input = createCheckboxInput(value)
         }
-        else if (['igVec3fMetaField', 'igVec2fMetaField'].includes(type)) {
-            const elements = type == 'igVec3fMetaField' ? 3 : 2
+        else if (type.startsWith('igVec') && type.endsWith('fMetaField')) {
+            const elements = parseInt(type[5])
             const div = document.createElement('div')
             div.className = 'vec-input'
+
+            field.inputs = []
 
             for (let i = 0; i < elements; i++) {
                 const input = createNumberInput('readFloat', i * 4)
                 input.style.borderRight = i < elements - 1 ? '1px solid #5c5c5c' : ''
-                input.onchange = () => this.onFieldUpdate(input, field, input.value, i)
+                input.onchange = () => this.onFieldUpdate(field, input.value, i)
                 div.appendChild(input)
+                field.inputs.push(input)
             }
 
             val.style.display = 'contents'
@@ -281,25 +290,27 @@ class ObjectView {
             input = createNumberInput('readInt')
         }
 
-        if (input.onchange == null) input.onchange = () => this.onFieldUpdate(input, field, input.value)
+        if (input.onchange == null) input.onchange = () => this.onFieldUpdate(field, input.value)
         val.appendChild(input)
+
+        field.input = input // Save a reference to the input field
 
         return val
     }
 
     // Update an object's data when a field is modified
     // Apply changes to all objects if the "Apply to all" checkbox is checked
-    onFieldUpdate(input, field, value, id) {
+    onFieldUpdate(field, value, id) {
         const searchMatches = Main.tree.matched()
 
         if (elm('#apply-all-checkbox').checked && searchMatches.length > 0) {
             searchMatches.each(e => {
                 const object = Main.igz.objects[e.objectIndex]
-                this.updateObjectData(object, input, field, value, id)
+                this.updateObjectData(object, field, value, id)
             })
         }
         else {
-            this.updateObjectData(this.object, input, field, value, id)
+            this.updateObjectData(this.object, field, value, id)
         }
 
         this.object.updated = Object.keys(updated_data[this.object.index] ?? {}).length > 0
@@ -319,28 +330,32 @@ class ObjectView {
      * @param {string} value - The new value of the field
      * @param {number} id - Element offset (for Vec2f and Vec3f fields)
     */
-    updateObjectData(object, input, field, value, id = 0) {
+    updateObjectData(object, field, value, id = 0) {
         let previousValue = null
+        let autoUpdate = true
 
-        const relativeCalculation = (type) => {
+        const relativeCalculation = (type, id) => {
             const readMethod = 'read' + type
             const writeMethod = 'set' + type
-            previousValue = object.view[readMethod](field.offset + id * 4)
+            const dataOffset = field.offset + (id ?? 0) * 4
+            previousValue = object.view[readMethod](dataOffset)
 
-            let num = Number(value.replace(/\D/g, '')) // Extract number from string
+            let num = Number(value.replace(',', '.').replace(/[^\d.-]/g, '')) // Extract number from string
 
             // Perform relative calculation
-            if (value.startsWith('+')) num = previousValue + num
-            else if (value.startsWith('-=')) num = previousValue - num
+            if (value.startsWith('+') || value.startsWith('-=')) num = previousValue + num
             else if (value.startsWith('*')) num = previousValue * num
             else if (value.startsWith('/')) num = previousValue / num
             
             if (type === 'Float') num = parseFloat(num.toFixed(3))
 
             // Update input value
-            input.value = num
+            if (id != null) field.inputs[id].value = num
+            else field.input.value = num
+            value = num
+
             // Update object data
-            object.view[writeMethod](num, field.offset + id * 4)
+            object.view[writeMethod](num, dataOffset)
 
             return num
         }
@@ -357,8 +372,26 @@ class ObjectView {
         else if (field.type == 'igUnsignedShortMetaField') {
             relativeCalculation('UInt16')
         }
-        else if (['igFloatMetaField', 'igVec3fMetaField', 'igVec2fMetaField'].includes(field.type)) {
+        else if (field.type == 'igFloatMetaField') {
             relativeCalculation('Float')
+        }
+        else if (field.type.startsWith('igVec') && field.type.endsWith('fMetaField')) {
+            // Update all values at once (paste operation)
+            if (typeof(value) === 'object') {
+                const item_count = parseInt(field.type[5])
+
+                for (let i = 0; i < item_count; i++) {
+                    const previousValue = object.view.readFloat(field.offset + i * 4)
+                    object.view.setFloat(value[i], field.offset + i * 4)
+                    field.inputs[i].value = parseFloat(value[i].toFixed(3))
+                    addUpdatedData(object, this.fields.indexOf(field), value[i], previousValue, i)
+                }
+                autoUpdate = false
+            }
+            // Perform relative calculation on a single component
+            else {
+                relativeCalculation('Float', id)
+            }
         }
         else if (field.type == 'igBoolMetaField') {
             previousValue = object.view.readByte(field.offset) === 1
@@ -366,14 +399,24 @@ class ObjectView {
             object.view.setByte(value, field.offset)
         }
         else if (field.type == 'igStringMetaField') {
+            if (typeof value === 'string')
+                value = Math.max(0, Main.igz.fixups.TSTR.data.indexOf(value))
             previousValue = object.view.readUInt(field.offset)
-            value = Math.max(0, Main.igz.fixups.TSTR.data.indexOf(value))
             object.view.setUInt(value, field.offset)
+            field.input.value = value > 0 ? Main.igz.fixups.TSTR.data[value] : '--- None ---'
         }
         else if (field.type == 'igObjectRefMetaField') {
+            let refOjbect = null
+            
+            if (typeof value === 'string') {
+                refOjbect = Main.igz.objects.find(e => e.getDisplayName() == value)
+                value = refOjbect?.offset ?? 0
+            }
+            refOjbect ??= Main.igz.objects.find(e => e.offset == value)
+
             previousValue = object.view.readUInt(field.offset)
-            value = Main.igz.objects.find(e => e.getDisplayName() == value)?.offset ?? 0
             object.view.setUInt(value, field.offset)
+            field.input.value = value > 0 && refOjbect != null ? refOjbect.getDisplayName() : '--- None ---'
         }
         else if (field.type == 'igBitFieldMetaField') {
             if (value === true) value = 1
@@ -393,7 +436,7 @@ class ObjectView {
         }
 
         // Keep track of updated fields
-        addUpdatedData(object, this.fields.indexOf(field), value, previousValue, id)
+        if (autoUpdate) addUpdatedData(object, this.fields.indexOf(field), value, previousValue, id)
 
         // Update object's node name in tree view
         const node = Main.tree.available().find(e => e.objectIndex == object.index)
@@ -412,9 +455,11 @@ class ObjectView {
     }
     
     // Check if a field data differs from the original data
-    isFieldUpdated = (field) => {
-        return updated_data[this.object.index] != null && 
-               updated_data[this.object.index][this.fields.indexOf(field)] != null
+    isFieldUpdated(field, id) {
+        if (updated_data[this.object.index] == null) return false
+        if (updated_data[this.object.index][this.fields.indexOf(field)] == null) return false
+        if (id != null && updated_data[this.object.index][this.fields.indexOf(field)][id] == null) return false
+        return true
     }
 
     // Sets the hex cells and fields references
@@ -431,7 +476,7 @@ class ObjectView {
     }
 
     // Sets the currently selected field and cell
-    setSelected = (field, cell) => {
+    setSelected(field, cell) {
         // Reset selection if clicked on the same field/cell
         this.selected = this.selected?.field === field || this.selected?.cell === cell ? null : { field, cell }
 
@@ -484,6 +529,110 @@ class ObjectView {
             this.hexCells.forEach(e => e.element.style.backgroundColor = '')
             this.fields.forEach(e => e.element.style.backgroundColor = '')
         }
+    }
+
+    /**
+     * Creates and open a context menu when right-clicking on a field
+     */
+    async createContextMenu(e, field) {
+        const isVectorType = field.type.startsWith('igVec') && field.type.endsWith('fMetaField')
+
+        if (!isVectorType && field.type !== 'igStringMetaField' && field.type !== 'igObjectRefMetaField') return
+
+        elm('#context-menu').style.left = e.clientX + 'px'
+        elm('#context-menu').style.top = e.clientY + 'px'
+        elm('#context-menu').onmouseleave = () => elm('#context-menu').style.display = 'none'
+
+        // "Spawn here" and "Spawn on crate" buttons
+
+        if (field.type === 'igVec3fMetaField') {
+            const x = this.object.view.readFloat(field.offset)
+            const y = this.object.view.readFloat(field.offset + 4)
+            const z = this.object.view.readFloat(field.offset + 8)
+
+            elm('#spawn-here').style.display = 'block'
+            elm('#spawn-here').onclick = () => {
+                elm('#context-menu').style.display = 'none'
+                saveTemporaryAndLaunch({ spawnPoint: [x, y, z] })
+            }
+            elm('#spawn-on-crate').style.display = 'block'
+            elm('#spawn-on-crate').onclick = () => {
+                elm('#context-menu').style.display = 'none'
+                saveTemporaryAndLaunch({ spawnPoint: [x, y, z], spawnCrate: [x, y, z] })
+            }
+        }
+        else {
+            elm('#spawn-here').style.display = 'none'
+            elm('#spawn-on-crate').style.display = 'none'
+        }
+
+        // "Copy" and "Paste" buttons
+
+        const paste = await navigator.clipboard.readText()
+
+        // Get the value of the field
+        const getCopyValue = () => {
+            if (isVectorType) {
+                const element_count = parseInt(field.type[5])
+                return this.object.view.readVector(field.offset, element_count)
+            }
+            return this.object.view.readInt(field.offset)
+        }
+
+        // Get the value of the clipboard
+        const getPasteValue = () => {
+            try {
+                if (isVectorType) {
+                    const element_count = parseInt(field.type[5])
+                    const data = JSON.parse(paste)
+                    if (data.length !== element_count)
+                    throw new Error()
+                    return data
+                }
+                else if (field.type === 'igStringMetaField') {
+                    const data = Number(paste)
+                    if (isNaN(data)) throw new Error()
+                    if (data < 0 || data >= Main.igz.fixups.TSTR.data.length) throw new Error()
+                    return data
+                }
+                else if (field.type === 'igObjectRefMetaField') {
+                    const data = Number(paste)
+                    const refOjbect = Main.igz.objects.find(e => e.offset == data)
+                    if (data === 0) return data
+                    if (refOjbect == null) throw new Error()
+                    if (field.metaObject && !getAllInheritedChildren(field.metaObject).add(field.type).has(refOjbect.type)) throw new Error()
+                    return data
+                }
+                else {
+                    const data = Number(paste)
+                    if (isNaN(data)) throw new Error()
+                    return data
+                }
+            }
+            catch {
+                return null
+            }
+        }
+
+        const pasteValue = getPasteValue()
+
+        // "Copy value" button
+        elm('#copy-field').style.display = 'block'        
+        elm('#copy-field').onclick = () => {
+            navigator.clipboard.writeText(JSON.stringify(getCopyValue()))
+            elm('#context-menu').style.display = 'none'
+        }
+
+        // "Paste value" button
+        elm('#paste-field').style.display = pasteValue != null ? 'block' : 'none'
+        elm('#paste-field').onclick = async () => {
+            this.onFieldUpdate(field, pasteValue)
+            elm('#context-menu').style.display = 'none'
+        }
+        
+        elm('#context-menu').style.display = 'block'
+
+        e.preventDefault()
     }
 
     // Find fields that have different values between objects
@@ -551,7 +700,7 @@ class ObjectView {
         if (type == 'igFloatMetaField')     return 'hex-float'
         if (type == 'igStringMetaField')    return 'hex-string'
         if (type == 'igObjectRefMetaField') return 'hex-child'
-        if (['igVec3fMetaField', 'igVec2fMetaField'].includes(type))
+        if (type.startsWith('igVec') && type.endsWith('fMetaField'))
             return 'hex-vec'
         if (['igUnsignedIntMetaField', 'igIntMetaField', 'igShortMetaField', 'igUnsignedShort'].includes(type)) 
             return 'hex-int'
@@ -703,10 +852,11 @@ function addUpdatedData(object, fieldIndex, value, originalValue, id = 0) {
     if (updated_data[object.index] == null)
         updated_data[object.index] = {}
 
-    if (updated_data[object.index][fieldIndex] == null) {
+    if (updated_data[object.index][fieldIndex] == null)
         updated_data[object.index][fieldIndex] = []
+
+    if (updated_data[object.index][fieldIndex][id] == null)
         updated_data[object.index][fieldIndex][id] = originalValue
-    }
 
     if (updated_data[object.index][fieldIndex][id] == value) {
         delete updated_data[object.index][fieldIndex][id]

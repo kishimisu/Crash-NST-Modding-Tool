@@ -224,11 +224,11 @@ code {
 }
 
 .hex-vec {
-  color: rgb(240, 170, 41)
+  color: rgb(240, 160, 41)
 }
 
 .hex-float {
-  color: rgb(145, 255, 253)
+  color: #70fff0;
 }
 
 .hex-int {
@@ -313,6 +313,17 @@ code {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+#context-menu {
+  display: none;
+  position: absolute;
+  z-index: 100;
+  background: #191919;
+  border: 1px solid #333;
+  padding: 2px;
+  box-shadow: 0 0 5px #000;
+  width: 160px;
 }
 
 .ref-list {

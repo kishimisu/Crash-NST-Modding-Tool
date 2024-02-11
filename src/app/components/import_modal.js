@@ -1,7 +1,7 @@
 import { ipcRenderer } from "electron"
 import Pak from "../../pak/pak.js"
 import FileInfos from "../../pak/fileInfos.js"
-import { elm } from "../utils.js"
+import { elm } from "./utils/utils.js"
 
 /**
  * "Import file" sub-window entry point

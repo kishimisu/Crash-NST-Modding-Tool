@@ -9,7 +9,7 @@ import jsonLang from 'highlight.js/lib/languages/json'
 import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
 import { init_file_import_modal } from './components/import_modal.js'
-import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './utils.js'
+import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
 
 import levels from '../../assets/crash/levels.txt'
 import '../../assets/styles/style.css'
@@ -17,6 +17,7 @@ import '../../assets/styles/inspire.css'
 import '../../assets/styles/hljs.css'
 import FileInfos from '../pak/fileInfos.js'
 import ObjectView, { clearUpdatedData } from './components/object_view.js'
+import PakModifiers from './components/utils/modifier.js'
 
 hljs.registerLanguage('json', jsonLang)
 
@@ -163,7 +164,7 @@ class Main {
                 children: [{ text: e.message }],
             }])
             treePreview.get(0).itree.ref.style.color = '#e3483a'
-            return
+            throw (e)
         }
 
         this.igz = igz
@@ -209,7 +210,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.4 - '
+        const title = 'The Apprentice v1.6 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -384,6 +385,7 @@ function loadPAK(filePath)
         Main.setPak(newPAK)
         Main.showPAKTree()
         onNodeClick(null, tree.get(0))
+        tree.available().find(e => e.type === 'folder' && e.text == 'maps/')?.expand()
 
         console.log('Load', filePath)
     }
@@ -417,6 +419,7 @@ async function saveFile(saveAs = false)
     // Save igz from pak
     if (Main.treeMode == 'igz' && pak != null && !saveAs) {
         updateIGZWithinPAK()
+        savePAK(pak.path)
         return
     }
 
@@ -439,7 +442,7 @@ function savePAK(filePath)
         pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count, message))
     }
     catch (e) {
-        ipcRenderer.send('set-progress-bar', filePath, 0, 1)
+        ipcRenderer.send('set-progress-bar', null)
         alert('An error occurred while saving the file:\n\n' + e.message)
         throw e
     }
@@ -539,10 +542,11 @@ async function importToPAK() {
 
         try {
             const import_count = pak.importFromPak(import_pak, selection, importDeps, progress_callback)
+            ipcRenderer.send('set-progress-bar', null)
             if (importDeps) alert(`Successfully imported ${import_count} files.`)
         }
         catch (e) {
-            ipcRenderer.send('set-progress-bar', '', 0, 1)
+            ipcRenderer.send('set-progress-bar', null)
             alert('An error occurred while importing the file:\n\n' + e.message)
             throw e
         }
@@ -582,7 +586,7 @@ function revertPakToOriginal() {
 /**
  * Launch the game executable with the selected level
  */
-function launchGame() {
+function launchGame(pak) {
     if (!isGameFolderSet()) return alert('Game folder not set')
 
     const exePath = getGameFolder('CrashBandicootNSaneTrilogy.exe')
@@ -609,13 +613,39 @@ function launchGame() {
 /**
  * Saves the current archive then launch the game
  */
-async function saveAndLaunch() {
+function saveAndLaunch() {
     if (pak == null) return // Can only save and launch from a .pak file
 
     if (Main.treeMode == 'igz') updateIGZWithinPAK()
 
-    savePAK(pak.path)
-    launchGame()
+    if (pak.updated) savePAK(pak.path)
+    launchGame(pak)
+}
+
+/**
+ * Saves a temporary version of the current archive with applied modifiers, 
+ * then launch the game. The original archive is not modified
+ */
+function saveTemporaryAndLaunch({ spawnPoint, spawnCrate }) {
+    if (pak == null) return
+
+    const tmpPak  = Pak.fromFile(pak.path)
+    const tmpPath = getTempFolder(pak.getOriginalArchiveName())
+
+    new PakModifiers(tmpPak, { spawnPoint, spawnCrate }).apply()
+    
+    try {
+        const message = 'Saving temporary archive...' 
+        tmpPak.save(tmpPath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', tmpPath, current_file, file_count, message))
+    }
+    catch (e) {
+        ipcRenderer.send('set-progress-bar', null)
+        alert('An error occurred while saving the file:\n\n' + e.message)
+        throw e
+    }
+    
+    tmpPak.path = tmpPath
+    launchGame(tmpPak)
 }
 
 /**
@@ -664,7 +694,7 @@ function backupGameFolder(restore = false) {
         alert(messages.success[restore])
     }
     catch (e) {
-        ipcRenderer.send('set-progress-bar', '', 0, 1)
+        ipcRenderer.send('set-progress-bar', null)
         alert('An error occurred:\n\n' + e.message)
         throw e
     }
@@ -742,7 +772,7 @@ window.onload = () =>
     /// Buttons
 
     // "Launch game" button
-    elm("#launch-game").addEventListener('click', () => launchGame())
+    elm("#launch-game").addEventListener('click', () => launchGame(pak))
     
     // "Import into PAK" button
     elm('#pak-import').addEventListener('click', () => importToPAK())
@@ -884,7 +914,7 @@ ipcRenderer.on('init-import-modal', (event, props) => init_file_import_modal(Mai
  */
 ipcRenderer.on('menu-open'   , (_, props) => loadFile(props))
 ipcRenderer.on('menu-reload' , () => window.location.reload())
-ipcRenderer.on('menu-import' , () => importToPAK(props))
+ipcRenderer.on('menu-import' , () => importToPAK())
 ipcRenderer.on('menu-save'   , () => saveFile(false))
 ipcRenderer.on('menu-save-as', () => saveFile(true))
 ipcRenderer.on('menu-save-launch', () => saveAndLaunch())
@@ -894,3 +924,7 @@ ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 
 window.Main = Main
+
+export {
+    saveTemporaryAndLaunch
+}

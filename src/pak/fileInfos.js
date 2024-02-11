@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "fs"
 import { BufferView, bytesToUInt, intToBytes } from "../utils"
 import { decompress } from 'lzma'
-import { getCacheFolder, getTempFolder } from "../app/utils"
+import { getCacheFolder, getTempFolder } from "../app/components/utils/utils"
 
 class FileInfos {
     constructor({ id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {

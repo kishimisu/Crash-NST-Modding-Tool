@@ -202,7 +202,7 @@ code {
   /* display: flex; */
   display: none;
   flex-direction: column;
-  max-height: 50%;
+  max-height: 36%;
 }
 
 #data-table-ctn {
@@ -225,6 +225,10 @@ code {
 
 .hex-vec {
   color: rgb(240, 160, 41)
+}
+
+.hex-array {
+  color: rgb(144 255 150)
 }
 
 .hex-float {

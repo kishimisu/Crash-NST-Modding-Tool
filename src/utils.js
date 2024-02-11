@@ -42,6 +42,7 @@ class BufferView {
     readInt16  = (offset) => this.getValue('getInt16', 2, offset)
     readUInt16 = (offset) => this.getValue('getUint16', 2, offset)
     readVector = (offset, size) => new Array(size).fill(0).map((_, i) => this.readFloat(i == 0 ? offset : null))
+    readVectorInt = (offset, size) => new Array(size).fill(0).map((_, i) => this.readInt(i == 0 ? offset : null))
     readByte   = (offset) => this.getValue('getUint8', 1, offset)
     readBytes  = (size, offset) => new Array(size).fill(0).map((_, i) => this.readByte(i == 0 ? offset : null))
     readChars  = (size, offset) => String.fromCharCode(...this.readBytes(size, offset))

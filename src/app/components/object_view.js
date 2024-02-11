@@ -1,6 +1,7 @@
 import types_metadata from '../../../assets/crash/types.metadata'
 import { BufferView, bitRead, bitReplace } from '../../utils'
 import { saveTemporaryAndLaunch } from '../renderer'
+import ObjectField from './object_field'
 import { elm } from "./utils/utils"
 
 // Process types metadata and hierarchy from file
@@ -102,7 +103,7 @@ class ObjectView {
             const field = this.fields[i]
             if (field.bitfield != null) continue
 
-            const colorType = field.bitfieldRoot ? 'hex-bool' : this.getFieldColor(field)
+            const colorType = field.bitfieldRoot ? 'hex-bool' : field.getColorClass()
             const childrenUpdated = field.bitfieldRoot && field.children.some(e => this.isFieldUpdated(e))
 
             // Colorize corresponding data cells
@@ -126,12 +127,12 @@ class ObjectView {
         this.container.innerHTML = ''
         this.container.onmouseleave = () => this.onMouseLeave()
 
+        this.createAdditionalFields()
+        
         // Create new rows for each field
         for (const field of this.fields) {
             this.createField(this.object, field)
         }
-
-        this.createAdditionalFields()
 
         // Add object's references to the bottom of the field list
         const refs = this.object.references.filter(e => e.index !== 0).map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
@@ -165,6 +166,9 @@ class ObjectView {
 
             // console.log( { valuesElmSize, valuesOffset, keysElmSize, keysOffset, itemCount, valuesType, keysType })
 
+            this.fields[0].elementSize = valueElmSize
+            this.fields[1].elementSize = keyElmSize
+
             let i = 0, additionalFields = 0
 
             while(additionalFields < itemCount) {
@@ -178,44 +182,46 @@ class ObjectView {
 
                 const string = Main.igz.fixups.TSTR.data[key]
                 
-                const field = {
-                    name: `#${additionalFields} ${keysType == 'igStringMetaField' ? string : keysType}`,
+                const field = new ObjectField({
+                    name: `#${additionalFields} ${keysType == 'igStringMetaField' || keysType == 'igNameMetaField' ? string : keysType}`,
                     type: valuesType,
                     offset: relativeValuesOffset + i * valueElmSize,
                     size: valueElmSize,
-                }
+                })
 
                 i++
                 additionalFields++
                 this.fields.push(field)
-                this.createField(this.object, field)
             }
         }
-        // CAudioArchiveHandleList
+        // igNameList, igObjectList, CAudioArchiveHandleList
         else if (this.fields.length >= 3 && this.fields[0].name == '_count' && this.fields[1].name == '_capacity' && this.fields[2].type == 'igMemoryRefMetaField') {
             const count         = this.object.view.readUInt(this.fields[0].offset)
             const capacity      = this.object.view.readUInt(this.fields[1].offset)
-            const valuesElmSize = this.object.view.readUInt(this.fields[2].offset)
+            const size          = this.object.view.readUInt(this.fields[2].offset)
             const valuesOffset  = this.object.view.readUInt(this.fields[2].offset + 8)
             const valuesType    = this.fields[2].memType
+            const valuesElmSize = count == 0 ? 0 : size / count
 
             if (count != capacity) console.warn('MemoryRefMetaField count and capacity are different:', count, capacity)
+            if (!Number.isInteger(valuesElmSize)) console.warn('MemoryRefMetaField size is not a multiple of count:', size, count, valuesElmSize)
 
             const valuesObject = Main.igz.findObject(valuesOffset)
             const relativeValuesOffset = Main.igz.getGlobalOffset(valuesOffset) - valuesObject.global_offset
 
-            // console.log({ count, capacity, valuesElmSize, valuesOffset, valuesType })
+            // console.log({ count, capacity, size, valuesElmSize, valuesOffset, valuesType })
+
+            this.fields[2].elementSize = valuesElmSize
 
             for (let i = 0; i < count; i++) {
-                const field = {
+                const field = new ObjectField({
                     name: `Item #${i}`,
                     type: valuesType,
-                    offset: relativeValuesOffset + i * 8,
-                    size: 8,
-                }
+                    offset: relativeValuesOffset + i * valuesElmSize,
+                    size: valuesElmSize,
+                })
 
                 this.fields.push(field)
-                this.createField(this.object, field)
             }
         }
     }
@@ -244,15 +250,15 @@ class ObjectView {
         const type = document.createElement('td')
         type.title = `Type: ${field.type}${field.metaObject ? ' | ' + field.metaObject : ''} ` + (field.bitfield ? `| Bits: ${field.bits}, Shift: ${field.shift}` : '')
         type.style.fontStyle = field.bitfieldRoot ? 'italic' : ''
-        type.innerText = this.prettifyType(field)
-        type.classList.add(this.getFieldColor(field))
+        type.innerText = field.getPrettyType()
+        type.classList.add(field.getColorClass())
         type.onclick = () => this.setSelected(field, field.hexCells[0])
 
         // Field data (input field)
         const data = this.createInputFieldValue(object, field)
 
         // Focus the start of the data when clicking on a Memory field
-        if (field.type === 'igMemoryRefMetaField') {
+        if (field.type === 'igMemoryRefMetaField' || field.type === 'igRawRefMetaField') {
             tr.addEventListener('click', () => {
                 const offset = Main.igz.getGlobalOffset(object.view.readUInt(field.offset + 8))
                 const refOjbect = Main.igz.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
@@ -271,8 +277,11 @@ class ObjectView {
         }
 
         // Add new row to table
-        tr.addEventListener('contextmenu', (e) => this.createContextMenu(e, field))
         tr.addEventListener('mouseover', () => this.onFieldHover(field))
+        tr.addEventListener('contextmenu', (e) => {
+            this.createContextMenu(field, e.clientX, e.clientY)
+            e.preventDefault()
+        })
         tr.appendChild(name)
         tr.appendChild(type)
         tr.appendChild(data)
@@ -327,15 +336,18 @@ class ObjectView {
             const value = object.view.readByte(field.offset)
             input = createCheckboxInput(value)
         }
-        else if (type.startsWith('igVec') && type.endsWith('fMetaField')) {
-            const elements = parseInt(type[5])
+        else if (field.isArrayType()) {
+            const elements = field.size / 4
             const div = document.createElement('div')
             div.className = 'vec-input'
 
+            if (!field.isVectorType()) div.style.flexDirection = 'column'
+            
+            const isFloat = type !== 'igVectorMetaField'
             field.inputs = []
 
             for (let i = 0; i < elements; i++) {
-                const input = createNumberInput('readFloat', i * 4)
+                const input = createNumberInput(isFloat ? 'readFloat' : 'readInt', i * 4)
                 input.style.borderRight = i < elements - 1 ? '1px solid #5c5c5c' : ''
                 input.onchange = () => this.onFieldUpdate(field, input.value, i)
                 div.appendChild(input)
@@ -346,7 +358,7 @@ class ObjectView {
             val.appendChild(div)
             return val
         }
-        else if (type == 'igStringMetaField') {
+        else if (field.isStringType()) {
             const str_index = object.view.readUInt(field.offset)
             const name = str_index > 0 ? Main.igz.fixups.TSTR.data[str_index] : null
             input = createDropdownInput(Main.igz.fixups.TSTR.data, name)
@@ -369,10 +381,8 @@ class ObjectView {
                 input = createNumberInput('readInt', 0, value)
         }
         else if (type == 'igMemoryRefMetaField') {
-            const elementSize = object.view.readUInt(field.offset)
-            // const offset = object.view.readUInt(field.offset + 8)
             input = document.createElement('div')
-            input.innerText = `Type: ${this.prettifyType(field.memType)} | Elm. Size: ${elementSize}`
+            input.innerText = `Type: ${field.getPrettyType(field.memType)} | ` + (field.elementSize > 0 ? `Elm. Size: ${field.elementSize}` : 'Count: 0')
         }
         else {
             input = createNumberInput('readInt')
@@ -463,22 +473,32 @@ class ObjectView {
         else if (field.type == 'igFloatMetaField') {
             relativeCalculation('Float')
         }
-        else if (field.type.startsWith('igVec') && field.type.endsWith('fMetaField')) {
+        else if (field.isArrayType()) {
             // Update all values at once (paste operation)
+            const isFloat = field.type !== 'igVectorMetaField'
             if (typeof(value) === 'object') {
-                const item_count = parseInt(field.type[5])
+                const item_count = field.size / 4
 
                 for (let i = 0; i < item_count; i++) {
-                    const previousValue = object.view.readFloat(field.offset + i * 4)
-                    object.view.setFloat(value[i], field.offset + i * 4)
-                    field.inputs[i].value = parseFloat(value[i].toFixed(3))
+                    let previousValue
+
+                    if (isFloat) {
+                        previousValue = object.view.readFloat(field.offset + i * 4)
+                        object.view.setFloat(value[i], field.offset + i * 4)
+                        field.inputs[i].value = parseFloat(value[i].toFixed(3))
+                    }
+                    else {
+                        previousValue = object.view.readInt(field.offset + i * 4)
+                        object.view.setInt(value[i], field.offset + i * 4)
+                        field.inputs[i].value = value[i]
+                    }
                     addUpdatedData(object, this.fields.indexOf(field), value[i], previousValue, i)
                 }
                 autoUpdate = false
             }
             // Perform relative calculation on a single component
             else {
-                relativeCalculation('Float', id)
+                relativeCalculation(isFloat ? 'Float' : 'Int', id)
             }
         }
         else if (field.type == 'igBoolMetaField') {
@@ -486,7 +506,7 @@ class ObjectView {
             value = value ? 1 : 0
             object.view.setByte(value, field.offset)
         }
-        else if (field.type == 'igStringMetaField') {
+        else if (field.isStringType()) {
             if (typeof value === 'string')
                 value = Math.max(0, Main.igz.fixups.TSTR.data.indexOf(value))
             previousValue = object.view.readUInt(field.offset)
@@ -516,6 +536,7 @@ class ObjectView {
 
             previousValue = bitRead(currentInt, field.bits, field.shift)
             value = bitRead(value, field.bits, field.shift)
+            if (field.metaField != 'igBoolMetaField') field.input.value = value
         }
         else {
             console.warn('Unhandled field type', field.type)
@@ -624,21 +645,17 @@ class ObjectView {
     /**
      * Creates and open a context menu when right-clicking on a field
      */
-    async createContextMenu(e, field) {
-        const isVectorType = field.type.startsWith('igVec') && field.type.endsWith('fMetaField')
+    async createContextMenu(field, x, y) {
+        if (!field.isArrayType() && !field.isStringType() && field.type !== 'igObjectRefMetaField') return
 
-        if (!isVectorType && field.type !== 'igStringMetaField' && field.type !== 'igObjectRefMetaField') return
-
-        elm('#context-menu').style.left = e.clientX + 'px'
-        elm('#context-menu').style.top = e.clientY + 'px'
+        elm('#context-menu').style.left = x + 'px'
+        elm('#context-menu').style.top = y + 'px'
         elm('#context-menu').onmouseleave = () => elm('#context-menu').style.display = 'none'
 
         // "Spawn here" and "Spawn on crate" buttons
 
         if (field.type === 'igVec3fMetaField') {
-            const x = this.object.view.readFloat(field.offset)
-            const y = this.object.view.readFloat(field.offset + 4)
-            const z = this.object.view.readFloat(field.offset + 8)
+            const [x, y, z] = this.object.view.readVector(field.offset, 3)
 
             elm('#spawn-here').style.display = 'block'
             elm('#spawn-here').onclick = () => {
@@ -662,24 +679,25 @@ class ObjectView {
 
         // Get the value of the field
         const getCopyValue = () => {
-            if (isVectorType) {
-                const element_count = parseInt(field.type[5])
-                return this.object.view.readVector(field.offset, element_count)
+            if (field.isArrayType()) {
+                const element_count = field.size / 4
+                const readMethod = field.type == 'igVectorMetaField' ? 'readVectorInt' : 'readVector'
+                return this.object.view[readMethod](field.offset, element_count)
             }
             return this.object.view.readInt(field.offset)
         }
 
-        // Get the value of the clipboard
+        // Get the value of the clipboard and convert it to the correct format
         const getPasteValue = () => {
             try {
-                if (isVectorType) {
-                    const element_count = parseInt(field.type[5])
+                if (field.isArrayType()) {
+                    const element_count = field.size / 4
                     const data = JSON.parse(paste)
                     if (data.length !== element_count)
                     throw new Error()
                     return data
                 }
-                else if (field.type === 'igStringMetaField') {
+                else if (field.isStringType()) {
                     const data = Number(paste)
                     if (isNaN(data)) throw new Error()
                     if (data < 0 || data >= Main.igz.fixups.TSTR.data.length) throw new Error()
@@ -721,8 +739,6 @@ class ObjectView {
         }
         
         elm('#context-menu').style.display = 'block'
-
-        e.preventDefault()
     }
 
     // Find fields that have different values between objects
@@ -779,36 +795,6 @@ class ObjectView {
 
         interesting_fields.fields[this.object.type] = interestingFields
     }
-
-    // Get the color class corresponding to a field type
-    getFieldColor(field) {
-        if (field.bitfieldRoot) return null
-
-        const type = field.metaField ?? field.type
-        if (type == 'igBoolMetaField')      return 'hex-bool'
-        if (type == 'igEnumMetaField')      return 'hex-enum'
-        if (type == 'igFloatMetaField')     return 'hex-float'
-        if (type == 'igStringMetaField')    return 'hex-string'
-        if (type == 'igObjectRefMetaField') return 'hex-child'
-        if (type.startsWith('igVec') && type.endsWith('fMetaField'))
-            return 'hex-vec'
-        if (['igUnsignedIntMetaField', 'igIntMetaField', 'igShortMetaField', 'igUnsignedShort'].includes(type)) 
-            return 'hex-int'
-    }
-
-    prettifyType(field) {
-        let type = typeof(field) == 'string' ? field : field.metaObject ?? field.metaField ?? field.type
-
-        if (type.startsWith('ig')) type = type.slice(2)
-        if (type.endsWith('MetaField')) type = type.slice(0, -9)
-
-        if (field.bitfield && field.metaField !== 'igBoolMetaField') type += ` (${field.bits})`
-
-        if (!field.metaObject)
-            type = type.replace(/(?<=[a-z])(?=[A-Z][a-z])/g, ' ')
-
-        return type
-    }
 }
 
 // Extract types metadata from the binary file
@@ -844,14 +830,14 @@ function read_all_types_metadata() {
         // Read fields
         for (let i = 0; i < fieldCount; i++) {
             // Read name and type
-            const field = {
+            const field = new ObjectField({
                 name: names[view.readUInt16()],
                 type: names[view.readUInt16()],
                 offset: view.readUInt16(),
                 size: view.readUInt16(),
                 typeSize: view.readUInt16(),
                 static: view.readByte() === 1
-            }
+            })
             
             // Read MetaObject (object reference type)
             if (field.type === 'igObjectRefMetaField' || field.type === 'igObjectRefArrayMetaField') {
@@ -880,7 +866,6 @@ function read_all_types_metadata() {
                 field.root.children.push(field)
                 field.root.bitfieldRoot = true
                 field.size = field.root.size
-                field.typeSize = field.root.typeSize
                 field.bitfield = true
             }
         })

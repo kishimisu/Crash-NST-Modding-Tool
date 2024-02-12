@@ -55,6 +55,7 @@ class ObjectField {
 
         // Add bit count
         if (this.bitfield && this.metaField !== 'igBoolMetaField') type += ` (${this.bits})`
+        if (this.type == 'igVectorMetaField') type += ` (${this.size / 4})`
 
         // Add space between camel case
         if (!this.metaObject) type = type.replace(/(?<=[a-z])(?=[A-Z][a-z])/g, ' ')

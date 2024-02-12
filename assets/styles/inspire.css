@@ -412,5 +412,5 @@
   .inspire-tree .matched>.wholerow,
   .inspire-tree .matched>.wholerow:hover,
   .inspire-tree .matched>.title-wrap:hover+.wholerow {
-    background-color: rgba(247, 255, 170, 0.5);
+    background-color: #eaea9b3d;
   }

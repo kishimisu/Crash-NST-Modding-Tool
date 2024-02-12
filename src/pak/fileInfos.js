@@ -155,7 +155,6 @@ class FileInfos {
             full_path: this.full_path,
             path: this.path,
             original: this.original,
-            updated: this.updated,
         }
     }
 }

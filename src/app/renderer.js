@@ -913,7 +913,7 @@ window.onload = () =>
 
     // (IGZ view) Back to .pak button
     elm('#back-pak').addEventListener('click', () => {
-        const confirm = !igz.updated || window.confirm('Warning: you have unsaved changes. Are you sure you want to go back to the PAK file?')
+        const confirm = !igz.updated || window.confirm('You have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
         const lastIndex = Main.lastFileIndex
         Main.showPAKTree()

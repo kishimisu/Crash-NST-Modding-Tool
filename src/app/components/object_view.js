@@ -402,16 +402,15 @@ class ObjectView {
         const searchMatches = Main.tree.matched()
 
         if (elm('#apply-all-checkbox').checked && searchMatches.length > 0) {
-            searchMatches.each(e => {
+            searchMatches.each((e, i) => {
                 const object = Main.igz.objects[e.objectIndex]
-                this.updateObjectData(object, field, value, id)
+                this.updateObjectData(object, field, value, i == 0, id)
             })
         }
         else {
-            this.updateObjectData(this.object, field, value, id)
+            this.updateObjectData(this.object, field, value, true, id)
         }
 
-        this.object.updated = Object.keys(updated_data[this.object.index] ?? {}).length > 0
         Main.igz.updated = true
         if (Main.pak) Main.pak.updated = true
 
@@ -428,7 +427,7 @@ class ObjectView {
      * @param {string} value - The new value of the field
      * @param {number} id - Element offset (for Vec2f and Vec3f fields)
     */
-    updateObjectData(object, field, value, id = 0) {
+    updateObjectData(object, field, value, updateInput, id = 0) {
         let previousValue = null
         let autoUpdate = true
 
@@ -448,8 +447,11 @@ class ObjectView {
             if (type === 'Float') num = parseFloat(num.toFixed(3))
 
             // Update input value
-            if (id != null) field.inputs[id].value = num
-            else field.input.value = num
+            if (updateInput) {
+                if (id != null) field.inputs[id].value = num
+                else field.input.value = num
+            }
+
             value = num
 
             // Update object data
@@ -485,12 +487,12 @@ class ObjectView {
                     if (isFloat) {
                         previousValue = object.view.readFloat(field.offset + i * 4)
                         object.view.setFloat(value[i], field.offset + i * 4)
-                        field.inputs[i].value = parseFloat(value[i].toFixed(3))
+                        if (updateInput) field.inputs[i].value = parseFloat(value[i].toFixed(3))
                     }
                     else {
                         previousValue = object.view.readInt(field.offset + i * 4)
                         object.view.setInt(value[i], field.offset + i * 4)
-                        field.inputs[i].value = value[i]
+                        if (updateInput) field.inputs[i].value = value[i]
                     }
                     addUpdatedData(object, this.fields.indexOf(field), value[i], previousValue, i)
                 }
@@ -511,7 +513,7 @@ class ObjectView {
                 value = Math.max(0, Main.igz.fixups.TSTR.data.indexOf(value))
             previousValue = object.view.readUInt(field.offset)
             object.view.setUInt(value, field.offset)
-            field.input.value = value > 0 ? Main.igz.fixups.TSTR.data[value] : '--- None ---'
+            if (updateInput) field.input.value = value > 0 ? Main.igz.fixups.TSTR.data[value] : '--- None ---'
         }
         else if (field.type == 'igObjectRefMetaField') {
             let refOjbect = null
@@ -524,7 +526,7 @@ class ObjectView {
 
             previousValue = object.view.readUInt(field.offset)
             object.view.setUInt(value, field.offset)
-            field.input.value = value > 0 && refOjbect != null ? refOjbect.getDisplayName() : '--- None ---'
+            if (updateInput) field.input.value = value > 0 && refOjbect != null ? refOjbect.getDisplayName() : '--- None ---'
         }
         else if (field.type == 'igBitFieldMetaField') {
             if (value === true) value = 1
@@ -559,6 +561,8 @@ class ObjectView {
         this.createHexDataCells()
         this.onFieldHover(field)
         this.lastEditTime = Date.now()
+
+        object.updated = Object.keys(updated_data[object.index] ?? {}).length > 0
 
         saveCellIDs.forEach(e => this.hexCells[e].element.classList.add('hex-flash')) // Flashing animation
     }

@@ -12,8 +12,10 @@ class ObjectField {
         type ??= this.type
         return this.isVectorType(type) || [
             'igVectorMetaField', 
-            'igFloatArrayMetaField'
-        ].includes(type)    
+            'igFloatArrayMetaField',
+            'igMatrix44fMetaField',
+            'igQuaternionfMetaField'
+        ].includes(type)
     }
 
     isStringType(type) {

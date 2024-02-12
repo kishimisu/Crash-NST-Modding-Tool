@@ -4,7 +4,7 @@ This tool lets you explore and edit .pak archives and .igz files for the PC vers
 
 You can edit igz directly from within pak archives and rebuild new archives without having to leave the app.
 
-This is a very early demo, bugs may appear. Feedback and contributions are welcome!
+This is an early demo, bugs may appear. Feedback and contributions are welcome!
 
 You can download it for Windows on [the release page](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases).
 For other OS, see below for build instructions.
@@ -70,7 +70,17 @@ If you select an object that is the result of a search query, you will have the 
 Relative calculation works with multi-editing and will affect each object's relative to its original value.
 
 #### Interesting properties
-When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. All properties in white have the same value for all other objects of the same type.
+When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. These properties will be colored in red. All properties in white have the same value for all other objects of the same type.
+
+#### Copy/Paste
+For complex types like Object References, String Reference, Vectors, Arrays or Matrices, you have the possibility to right-click on a field to copy the value to your clipboard. You can also use it to paste data between properties of the same type.
+
+#### Spawn at Vector
+Two additional options become available when right-clicking on Vector3f properties:
+- Spawn Here : Launches the game while spawning Crash at the selected location, without saving or updating the current archive.
+- Spawn on Crate : Same, but it will also spawn a crate at the specified location.
+
+The can help you visualize the position of objects in a level.
 
 ### Other infos
 

@@ -341,7 +341,8 @@ class ObjectView {
             const div = document.createElement('div')
             div.className = 'vec-input'
 
-            if (!field.isVectorType()) div.style.flexDirection = 'column'
+            if (field.type == 'igVectorMetaField' || field.type == 'igFloatArrayMetaField') div.style.flexDirection = 'column'
+            if (field.type == 'igMatrix44fMetaField') div.style.flexWrap = 'wrap'
             
             const isFloat = type !== 'igVectorMetaField'
             field.inputs = []
@@ -350,6 +351,7 @@ class ObjectView {
                 const input = createNumberInput(isFloat ? 'readFloat' : 'readInt', i * 4)
                 input.style.borderRight = i < elements - 1 ? '1px solid #5c5c5c' : ''
                 input.onchange = () => this.onFieldUpdate(field, input.value, i)
+                if (field.type == 'igMatrix44fMetaField' || field.type == 'igQuaternionfMetaField') input.style.width = '24%'
                 div.appendChild(input)
                 field.inputs.push(input)
             }

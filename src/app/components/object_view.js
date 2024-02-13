@@ -397,6 +397,20 @@ class ObjectView {
             input.innerText = `Offset: ${value}`
             if (value - object.offset > 0) input.innerText += ` (0x${(value - object.offset).toString(16).toUpperCase()})`
         }
+        else if (type == 'igHandleMetaField') {
+            const index = object.view.readUInt(field.offset)
+            const fixup = index & 0x80000000 ? 'EXNM' : 'EXID'
+
+            if (fixup == 'EXID') {
+                // Not supported
+                input = createNumberInput('readUInt')
+            }
+            else {
+                const names = Main.igz.fixups[fixup].data.map(e => e[0])
+                const value = names[index & 0x3FFFFFFF]
+                input = createDropdownInput(names, value)
+            }
+        }
         else {
             input = createNumberInput('readInt')
         }
@@ -552,6 +566,13 @@ class ObjectView {
             previousValue = bitRead(currentInt, field.bits, field.shift)
             value = bitRead(value, field.bits, field.shift)
             if (field.metaField != 'igBoolMetaField') field.input.value = value
+        }
+        else if (field.type == 'igHandleMetaField') {
+            const index = Main.igz.fixups.EXNM.data.findIndex(e => e[0] == value)
+            value = index < 0 ? 0 : (index | 0x80000000) >>> 0
+            previousValue = object.view.readUInt(field.offset)
+            object.view.setUInt(value, field.offset)
+            if (updateInput) field.input.value = index >= 0 ? Main.igz.fixups.EXNM.data[index][0] : '--- None ---'
         }
         else {
             console.warn('Unhandled field type', field.type)

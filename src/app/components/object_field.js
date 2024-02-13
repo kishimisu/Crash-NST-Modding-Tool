@@ -34,18 +34,31 @@ class ObjectField {
         ].includes(type ?? this.type)
     }
 
+    isMemoryRefType(type) {
+        return [
+            'igMemoryRefMetaField',
+            'igRawRefMetaField',
+        ].includes(type ?? this.type)
+    }
+
     getColorClass() {
         if (this.bitfieldRoot) return null
-
         const type = this.metaField ?? this.type
+
         if (type == 'igBoolMetaField')      return 'hex-bool'
         if (type == 'igEnumMetaField')      return 'hex-enum'
         if (type == 'igFloatMetaField')     return 'hex-float'
         if (type == 'igObjectRefMetaField') return 'hex-child'
-        if (this.isStringType(type))        return 'hex-string'
-        if (this.isVectorType(type))        return 'hex-vec'
-        if (this.isArrayType(type))         return 'hex-array'
         if (this.isIntegerType(type))       return 'hex-int'
+        if (this.isMemoryRefType(type))     return 'hex-handle'
+        if (this.isVectorType(type) 
+            || type == 'igMatrix44fMetaField'
+            || type == 'igQuaternionfMetaField')
+                                            return 'hex-vec'
+        if (this.isStringType(type)
+            || type == 'igHandleMetaField')
+                                            return 'hex-string'
+        if (this.isArrayType(type))         return 'hex-array'                   
     }
 
     getPrettyType(type) {

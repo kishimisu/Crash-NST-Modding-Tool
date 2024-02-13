@@ -218,6 +218,10 @@ code {
   color: rgb(111, 173, 255);
 }
 
+.hex-handle {
+  color: rgb(174 209 255);
+}
+
 .hex-zero {
   color: #666;
   /* filter: saturate(0.15) */

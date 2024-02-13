@@ -260,17 +260,22 @@ class ObjectView {
         // Focus the start of the data when clicking on a Memory field
         if (field.type === 'igMemoryRefMetaField' || field.type === 'igRawRefMetaField') {
             tr.addEventListener('click', () => {
-                const offset = Main.igz.getGlobalOffset(object.view.readUInt(field.offset + 8))
-                const refOjbect = Main.igz.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
+                const dataOffset = field.type === 'igMemoryRefMetaField' ? 8 : 0
+                const objectOffset = object.view.readUInt(field.offset + dataOffset)
+                const refObject = Main.igz.findObject(objectOffset)
+                const relativeOffset = Main.igz.getGlobalOffset(objectOffset) - refObject.global_offset
 
                 // Focus in hex view
-                const view = new ObjectView(refOjbect)
-                const refCell = view.hexCells.find(e => e.offset === offset - refOjbect.global_offset)
-                view.setSelected(refCell.fields[0], refCell)
-                view.onCellHover(refCell, true)
+                const view = new ObjectView(refObject)
+                const refCell = view.hexCells.find(e => e.offset == relativeOffset)
+
+                if (refCell) {
+                    view.setSelected(refCell.fields[0], refCell)
+                    view.onCellHover(refCell, true)
+                }
 
                 // Focus in tree view
-                const refNode = Main.tree.available().find(e => e.objectIndex == refOjbect.index)
+                const refNode = Main.tree.available().find(e => e.objectIndex == refObject.index)
                 refNode?.expandParents()
                 refNode?.select()
             })
@@ -385,6 +390,12 @@ class ObjectView {
         else if (type == 'igMemoryRefMetaField') {
             input = document.createElement('div')
             input.innerText = `Type: ${field.getPrettyType(field.memType)} | ` + (field.elementSize > 0 ? `Elm. Size: ${field.elementSize}` : 'Count: 0')
+        }
+        else if (type == 'igRawRefMetaField') {
+            const value = object.view.readUInt(field.offset)
+            input = document.createElement('div')
+            input.innerText = `Offset: ${value}`
+            if (value - object.offset > 0) input.innerText += ` (0x${(value - object.offset).toString(16).toUpperCase()})`
         }
         else {
             input = createNumberInput('readInt')

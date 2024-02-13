@@ -660,7 +660,7 @@ class ObjectView {
 
         // "Spawn here" and "Spawn on crate" buttons
 
-        if (field.type === 'igVec3fMetaField') {
+        if (field.type === 'igVec3fMetaField' && Main.pak?.package_igz != null) {
             const [x, y, z] = this.object.view.readVector(field.offset, 3)
 
             elm('#spawn-here').style.display = 'block'

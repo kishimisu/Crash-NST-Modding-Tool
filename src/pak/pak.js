@@ -86,7 +86,7 @@ class Pak {
 
         // Check if files are included in the package file
         for (const file of this.files) {
-            file.include_in_pkg = this.package_igz.fixups.TSTR.data.includes(file.path.toLowerCase())
+            file.include_in_pkg = this.package_igz?.fixups.TSTR.data.includes(file.path.toLowerCase())
         }
 
         if (!this.files.every((e, i) => i == 0 || e.id >= this.files[i-1].id)) throw new Error('Files are not sorted by ID')
@@ -99,7 +99,8 @@ class Pak {
         const DATA_START  = HEADER_SIZE + file_count * 20
 
         // Update package file
-        this.updatePackageFile()
+        if (this.package_igz != null)
+            this.updatePackageFile()
 
         // Calculate file IDs
         this.files.forEach(e => e.computeID())
@@ -350,7 +351,7 @@ class Pak {
      * @returns the name of the original .pak file 
      */
     getOriginalArchiveName() {
-        return this.package_igz.path.split('/').pop().replaceAll('.igz', '.pak').replaceAll('_pkg', '')
+        return this.package_igz?.path.split('/').pop().replaceAll('.igz', '.pak').replaceAll('_pkg', '')
     }
 
     cloneFile(index) {

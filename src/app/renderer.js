@@ -21,10 +21,26 @@ import '../../assets/styles/hljs.css'
 
 hljs.registerLanguage('json', jsonLang)
 
+/*
+    App entry point
+*/
+window.onload = main
+
 let pak  // Current Pak instance
 let igz  // Current Igz instance 
 let tree // Main tree (left)
 let treePreview // IGZ preview tree (right)
+
+// Ordered level name list
+const level_names = levels
+    .split('\n')
+    .map(e => e.trim())
+    .sort((a, b) => {
+        if (a[7] == 'l' && b[7] == 'l') return a.localeCompare(b)
+        if (a[7] == 'l') return -1
+        if (b[7] == 'l') return 1
+        return a.slice(6).localeCompare(b.slice(6))
+    })
 
 /**
  * Main manager for window content and app state
@@ -396,10 +412,11 @@ function loadPAK(filePath)
 
         // Update level selector
         const findLevelName = (pakName) => {
+            if (pakName == null) return null
             pakName = pakName.toLowerCase().replace('.pak', '')
-            return levels.split('\n').map(e => e.trim()).find(e => e.includes(pakName))
+            return level_names.find(e => e.includes(pakName))
         }
-        elm('#level-select').value = findLevelName(newPAK.getOriginalArchiveName()) ?? levels[1]
+        elm('#level-select').value = findLevelName(newPAK.getOriginalArchiveName()) ?? level_names[1]
 
         Main.igz = igz = null
         Main.setPak(newPAK)
@@ -586,7 +603,8 @@ async function importToPAK() {
 function revertPakToOriginal() {
     if (!isGameFolderSet()) return alert('Game folder not set')
 
-    const name = pak.getOriginalArchiveName()
+    let name = pak.getOriginalArchiveName()
+    if (name == null && pak.path.includes('LooseFiles')) name = 'LooseFiles.pak'
     const savedPath = getBackupFolder(name)
     const originalPath = getArchiveFolder(name)
 
@@ -618,7 +636,7 @@ function launchGame(pak) {
     elm("#launch-game").disabled = true
     setTimeout(() => elm("#launch-game").disabled = false, 4000)
 
-    if (elm('#use-current-pak').checked) {
+    if (elm('#use-current-pak').checked && pak.package_igz != null) {
         // Replace pak in game folder with current pak
         const originalName = pak.getOriginalArchiveName()
         const originalPath = getArchiveFolder(originalName)
@@ -733,7 +751,7 @@ async function changeGameFolderPath() {
 /**
  * Main app window entry point
  */
-window.onload = () => 
+function main() 
 {
     // Create preiew tree (right)
     treePreview = Main.createTree('.tree-preview', { 
@@ -781,23 +799,12 @@ window.onload = () =>
     })
 
     /// Create level selector
-    const level_names = levels
-            .split('\n')
-            .map(e => e.trim())
-            .sort((a, b) => {
-                if (a[7] == 'l' && b[7] == 'l') return a.localeCompare(b)
-                if (a[7] == 'l') return -1
-                if (b[7] == 'l') return 1
-                return a.slice(6).localeCompare(b.slice(6))
-            })
-            
     level_names.forEach(e => {
         const option = document.createElement('option')
         option.value = e
         option.innerText = e
         elm('#level-select').appendChild(option)
     })
-
     elm('#level-select').value = localStorage.getItem('last_level') ?? level_names[1]
     
     /// Buttons

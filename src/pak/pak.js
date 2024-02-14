@@ -88,9 +88,6 @@ class Pak {
         for (const file of this.files) {
             file.include_in_pkg = this.package_igz?.fixups.TSTR.data.includes(file.path.toLowerCase())
         }
-
-        if (!this.files.every((e, i) => i == 0 || e.id >= this.files[i-1].id)) throw new Error('Files are not sorted by ID')
-        if (this.files.some(e => e.id != e.computeID())) throw new Error('File ID mismatch')
     }
 
     save(filePath, progressCallback) {
@@ -103,7 +100,7 @@ class Pak {
             this.updatePackageFile()
 
         // Calculate file IDs
-        this.files.forEach(e => e.computeID())
+        this.files.forEach(e => e.computeHash())
 
         // Sort files by ID (important!)
         this.files = this.files.sort((a, b) => a.id - b.id)
@@ -463,7 +460,7 @@ class Pak {
         let root = tree[0]
 
         // Concatenate root single child folders
-        while (root.children.length == 1) {
+        while (root.children?.length == 1 && root.children[0].type == 'folder') {
             root.children[0].text = root.text + root.children[0].text
             root = root.children[0]
         }

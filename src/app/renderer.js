@@ -227,7 +227,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.6 - '
+        const title = 'The Apprentice v1.8 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path

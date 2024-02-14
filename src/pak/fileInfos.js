@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "fs"
-import { BufferView, bytesToUInt, intToBytes } from "../utils"
+import { BufferView, bytesToUInt, computeHash, intToBytes } from "../utils"
 import { decompress } from 'lzma'
 import { getCacheFolder, getTempFolder } from "../app/components/utils/utils"
 
@@ -130,18 +130,8 @@ class FileInfos {
         return data
     }
 
-    // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
-    computeID() {
-        const name = this.path.toLowerCase()
-        let b = 0x811c9dc5
-
-        for (let i = 0; i < name.length; i++) {
-            b ^= name.charCodeAt(i)
-            b += (b << 1) + (b << 4) + (b << 7) + (b << 8) + (b << 24)
-        }
-
-        this.id = b >>> 0
-
+    computeHash() {
+        this.id = computeHash(this.path)
         return this.id
     }
 

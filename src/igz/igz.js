@@ -4,9 +4,9 @@ import { BufferView, computeHash, extractName } from '../utils.js'
 import Fixup from './fixup.js'
 import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
-import NSTPC from '../../assets/crash/NSTPC.txt'
-import NST_FILE_INFOS from '../../assets/crash/files_infos.txt'
 import Pak from '../pak/pak.js'
+
+import NST_FILE_INFOS from '../../assets/crash/files_infos.txt'
 
 const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
@@ -157,9 +157,7 @@ class IGZ {
 
         /// Get children + references ///
 
-        const rofs = this.fixups.ROFS.data
-
-        for (const offset of rofs) {
+        for (const offset of this.fixups.ROFS.data) {
             const global_offset = this.getGlobalOffset(offset & 0xfbffffff)
             const object = this.objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size)
             
@@ -267,9 +265,8 @@ class IGZ {
      * @param {string[]} file_paths List containing all paths of the oarent .pak archive
      * @returns New igz file buffer
      */
-    updatePKG(file_paths) {
-        const nst_data = JSON.parse(NSTPC)
-
+    updatePKG(file_paths) 
+    {
         const typesOrder = [
             'script', 'sound_sample', 'sound_bank', 'lang_file',
             'texture', 'material_instances', 'vsc', 'igx_file', 
@@ -283,23 +280,25 @@ class IGZ {
         const filesByType = Object.fromEntries(typesOrder.map(e => [e, []]))
         const types = new Set()
         
-        file_paths = file_paths.filter(e => nst_data[e] != null).sort((a, b) => a.localeCompare(b))
+        file_paths = file_paths.sort((a, b) => a.localeCompare(b))
 
         // Group files by type
         for (let i = 0; i < file_paths.length; i++) {
             const path = file_paths[i]
-            const type = nst_data[path].type
+            const type = file_types[computeHash(path)]
 
-            if (filesByType[type] == null) throw new Error('Type not found: ' + type)
-            else filesByType[type].push(path)
+            if (type == 'unknown') throw new Error('Type unknown for ' + path)
+            if (type == null) console.warn('Type not found for ' + path)
+            if (filesByType[type] == null) throw new Error('Type not implemented: ' + type)
 
             types.add(type)
+            filesByType[type].push({path, type})
         }
 
         // Build new TSTR data
         const files = typesOrder.map(e => filesByType[e]).flat()
         const new_TSTR  = Array.from(types).sort((a, b) => a.localeCompare(b))
-                         .concat(files)
+                         .concat(files.map(e => e.path))
                          .concat('chunk_info')
 
         // Update TSTR
@@ -308,11 +307,9 @@ class IGZ {
         // Build new igStreamingChunkInfo data
         const chunk_info_data = []
         for (let i = 0; i < files.length; i++) {
-            const file_path = files[i]
-            const file_type = nst_data[file_path].type
-
-            const file_path_id = new_TSTR.indexOf(file_path)
-            const file_type_id = new_TSTR.indexOf(file_type)
+            const { path, type } = files[i]
+            const file_path_id = new_TSTR.indexOf(path)
+            const file_type_id = new_TSTR.indexOf(type)
 
             chunk_info_data.push([file_type_id, file_path_id])
         }
@@ -367,6 +364,7 @@ class IGZ {
 
         const internal_files = {}
         const external_paks  = {}
+        const new_exid = []
 
         // Group objects by file, and by pak
         for (const [index, [object_hash, file_hash]] of Object.entries(this.fixups.EXID.data)) {
@@ -378,13 +376,18 @@ class IGZ {
             }
             else {
                 const file_data = namespace_hashes[file_hash]
+
+                if (file_data == null) {
+                    console.warn(`File not found: ${index}, ${file_hash}, ${object_hash}`)
+                    new_exid[index] = ['File Not Found', 'Error']
+                    continue
+                }
+
                 external_paks[file_data.pak] ??= {}
                 external_paks[file_data.pak][file_data.path] ??= []
                 external_paks[file_data.pak][file_data.path].push({ id: Number(index), object_hash })
             }
         }
-
-        const new_exid = []
 
         const addObjectsFromPak = (pak, files) => {
             for (const file in files) {

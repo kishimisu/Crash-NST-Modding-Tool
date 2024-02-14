@@ -280,6 +280,19 @@ class ObjectView {
                 refNode?.select()
             })
         }
+        else if (field.bitfieldRoot) {
+            const toggleBitfield = () => {
+                field.children.forEach(e => e.element.style.display = e.element.style.display === 'none' ? '' : 'none')
+                data.innerText = field.children[0].element.style.display === 'none' ? 'Click to expand (+)' : 'Click to collapse (-)'
+            }
+            data.innerText = 'Click to expand (+)'
+            data.style.fontWeight = 400
+            data.style.cursor = 'pointer'
+            data.onclick = () => toggleBitfield()
+        }
+        else if (field.type === 'igBitFieldMetaField') {
+            tr.style.display = 'none'
+        }
 
         // Add new row to table
         tr.addEventListener('mouseover', () => this.onFieldHover(field))
@@ -398,27 +411,53 @@ class ObjectView {
             if (value - object.offset > 0) input.innerText += ` (0x${(value - object.offset).toString(16).toUpperCase()})`
         }
         else if (type == 'igHandleMetaField') {
-            const index = object.view.readUInt(field.offset)
-            const fixup = index & 0x80000000 ? 'EXNM' : 'EXID'
-            const short_names = Main.igz.fixups[fixup].data.map(e => `${e[1].slice(e[1].lastIndexOf('/') + 1)} | ${e[0]}`)
-            const full_names  = Main.igz.fixups[fixup].data.map(e => `${e[1]} | ${e[0]}`)
-            const value = short_names[index & 0x3FFFFFFF]
+            const exnm = Main.igz.fixups.EXNM?.data ?? []
+            const exid = Main.igz.fixups.EXID?.data ?? []
 
-            field.fixupType = fixup
+            const mapName = (type) => (name, id) => ({ name: name[0], path: name[1], id, type })
+            const names = exnm.map(mapName('EXNM')).concat(exid.map(mapName('EXID')))
+            const short_names = names.map(e => `${e.path.slice(e.path.lastIndexOf('/') + 1)} > ${e.name}`)
+            const full_names  = names.map(e => `|${e.type}| ${e.path} > ${e.name}`)
 
-            function setDropdownOptions(prev_names, new_names) {
+            const computeValue = (index) => {
+                if (index == 0) return '--- None ---'
+                const fixup = index & 0x80000000 ? 'EXNM' : 'EXID'
+                const nameIndex = names.findIndex(e => e.type == fixup && e.id == (index & 0x3FFFFFFF))
+                const value = index >= 0 ? short_names[nameIndex] : null
+                return value
+            }
+
+            function setDropdownOptions(prev_names, new_names, close = false) {
                 const id = prev_names.indexOf(input.value);
                 [].forEach.call(this.options, function(o, i) {
+                    o.style.textAlign = close ? 'center' : 'left'
                     if (i == 0) return
-                    o.textContent = new_names[i]
+                    o.textContent = new_names[i - 1]
                 })
                 if (id >= 0) input.value = new_names[id]
             }
 
+            const onDropdownUpdate = () => {
+                const names_id = full_names.indexOf(input.value)
+                if (names_id != -1) {
+                    let fixup_id = names[names_id].id
+                    if (names[names_id].type === 'EXNM') fixup_id = (fixup_id | 0x80000000) >>> 0
+                    this.onFieldUpdate(field, fixup_id)
+                }
+                else 
+                    this.onFieldUpdate(field, 0)
+            }
+
+            // Used for copy/paste
+            field.refreshDropdown = (index) => input.value = computeValue(index)
+
+            const index = object.view.readUInt(field.offset)
+            const value = computeValue(index)
+
             input = createDropdownInput(short_names, value)
-            input.onfocus = setDropdownOptions.bind(input, short_names, full_names)
-            input.onblur  = setDropdownOptions.bind(input, full_names, short_names)
-            input.onchange = () => this.onFieldUpdate(field, { id: full_names.indexOf(input.value), name: input.value })
+            input.onfocus  = setDropdownOptions.bind(input, short_names, full_names, false)
+            input.onblur   = setDropdownOptions.bind(input, full_names, short_names, true)
+            input.onchange = () => onDropdownUpdate()
         }
         else {
             input = createNumberInput('readInt')
@@ -577,10 +616,8 @@ class ObjectView {
             if (field.metaField != 'igBoolMetaField') field.input.value = value
         }
         else if (field.type == 'igHandleMetaField') {
-            if (field.fixupType == 'EXNM') value.id = (value.id | 0x80000000) >>> 0
             previousValue = object.view.readUInt(field.offset)
-            object.view.setUInt(value.id, field.offset)
-            value = value.id
+            object.view.setUInt(value, field.offset)
         }
         else {
             console.warn('Unhandled field type', field.type)
@@ -692,7 +729,7 @@ class ObjectView {
      * Creates and open a context menu when right-clicking on a field
      */
     async createContextMenu(field, x, y) {
-        if (!field.isArrayType() && !field.isStringType() && field.type !== 'igObjectRefMetaField') return
+        if (field.isIntegerType() || field.isMemoryRefType()) return
 
         elm('#context-menu').style.left = x + 'px'
         elm('#context-menu').style.top = y + 'px'
@@ -730,6 +767,9 @@ class ObjectView {
                 const readMethod = field.type == 'igVectorMetaField' ? 'readVectorInt' : 'readVector'
                 return this.object.view[readMethod](field.offset, element_count)
             }
+            else if (field.type === 'igHandleMetaField')
+                return this.object.view.readUInt(field.offset)
+
             return this.object.view.readInt(field.offset)
         }
 
@@ -757,6 +797,13 @@ class ObjectView {
                     if (field.metaObject && !getAllInheritedChildren(field.metaObject).add(field.type).has(refOjbect.type)) throw new Error()
                     return data
                 }
+                else if (field.type === 'igHandleMetaField') {
+                    const data = Number(paste)
+                    if (isNaN(data)) throw new Error()
+                    const fixup = data & 0x80000000 ? 'EXNM' : 'EXID'
+                    if ((data & 0x3fffffff) > Main.igz.fixups[fixup]?.data.length) throw new Error()
+                    return data
+                }
                 else {
                     const data = Number(paste)
                     if (isNaN(data)) throw new Error()
@@ -781,6 +828,7 @@ class ObjectView {
         elm('#paste-field').style.display = pasteValue != null ? 'block' : 'none'
         elm('#paste-field').onclick = async () => {
             this.onFieldUpdate(field, pasteValue)
+            if (field.type === 'igHandleMetaField') field.refreshDropdown(pasteValue)
             elm('#context-menu').style.display = 'none'
         }
         

@@ -17,10 +17,6 @@ module.exports = [
     },
   },
   {
-    test: /\.svg$/,
-    loader: 'svg-inline-loader'
-  },
-  {
     test: /\.txt$/,
     loader: 'raw-loader'
   },

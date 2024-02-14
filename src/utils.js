@@ -107,6 +107,31 @@ function formatSize(number) {
     return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + ' bytes'
 }
 
+/**
+ * Computes the hash for a file path, file name or object name
+ * https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
+ */
+function computeHash(name) {
+    name = name.toLowerCase()
+    let b = 0x811c9dc5
+
+    for (let i = 0; i < name.length; i++) {
+        b ^= name.charCodeAt(i)
+        b += (b << 1) + (b << 4) + (b << 7) + (b << 8) + (b << 24)
+    }
+
+    return b >>> 0
+}
+
+/**
+ * Extracts a file name from its path, without the extension
+ */
+function extractName(str) {
+    str = str.slice(str.lastIndexOf('/') + 1)
+    str = str.slice(0, str.lastIndexOf('.'))
+    return str
+}
+
 export {
     BufferView,
     bytesToUInt,
@@ -115,4 +140,6 @@ export {
     bitReplace,
     bitRead,
     formatSize,
+    computeHash,
+    extractName
 }

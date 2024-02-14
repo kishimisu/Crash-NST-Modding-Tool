@@ -400,16 +400,25 @@ class ObjectView {
         else if (type == 'igHandleMetaField') {
             const index = object.view.readUInt(field.offset)
             const fixup = index & 0x80000000 ? 'EXNM' : 'EXID'
+            const short_names = Main.igz.fixups[fixup].data.map(e => `${e[1].slice(e[1].lastIndexOf('/') + 1)} | ${e[0]}`)
+            const full_names  = Main.igz.fixups[fixup].data.map(e => `${e[1]} | ${e[0]}`)
+            const value = short_names[index & 0x3FFFFFFF]
 
-            if (fixup == 'EXID') {
-                // Not supported
-                input = createNumberInput('readUInt')
+            field.fixupType = fixup
+
+            function setDropdownOptions(prev_names, new_names) {
+                const id = prev_names.indexOf(input.value);
+                [].forEach.call(this.options, function(o, i) {
+                    if (i == 0) return
+                    o.textContent = new_names[i]
+                })
+                if (id >= 0) input.value = new_names[id]
             }
-            else {
-                const names = Main.igz.fixups[fixup].data.map(e => e[0])
-                const value = names[index & 0x3FFFFFFF]
-                input = createDropdownInput(names, value)
-            }
+
+            input = createDropdownInput(short_names, value)
+            input.onfocus = setDropdownOptions.bind(input, short_names, full_names)
+            input.onblur  = setDropdownOptions.bind(input, full_names, short_names)
+            input.onchange = () => this.onFieldUpdate(field, { id: full_names.indexOf(input.value), name: input.value })
         }
         else {
             input = createNumberInput('readInt')
@@ -568,11 +577,10 @@ class ObjectView {
             if (field.metaField != 'igBoolMetaField') field.input.value = value
         }
         else if (field.type == 'igHandleMetaField') {
-            const index = Main.igz.fixups.EXNM.data.findIndex(e => e[0] == value)
-            value = index < 0 ? 0 : (index | 0x80000000) >>> 0
+            if (field.fixupType == 'EXNM') value.id = (value.id | 0x80000000) >>> 0
             previousValue = object.view.readUInt(field.offset)
-            object.view.setUInt(value, field.offset)
-            if (updateInput) field.input.value = index >= 0 ? Main.igz.fixups.EXNM.data[index][0] : '--- None ---'
+            object.view.setUInt(value.id, field.offset)
+            value = value.id
         }
         else {
             console.warn('Unhandled field type', field.type)

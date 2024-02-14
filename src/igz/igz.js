@@ -1,9 +1,14 @@
 import { readFileSync, writeFileSync } from 'fs'
-import { BufferView } from '../utils.js'
+import { join } from 'path'
+import { BufferView, computeHash, extractName } from '../utils.js'
 import Fixup from './fixup.js'
 import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import NSTPC from '../../assets/crash/NSTPC.txt'
+import NST_FILE_INFOS from '../../assets/crash/files_infos.txt'
+import Pak from '../pak/pak.js'
+
+const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
 const IGZ_VERSION      = 10
 const IGZ_SIGNATURE    = 0x49475A01
@@ -347,6 +352,66 @@ class IGZ {
         return this.save()
     }
 
+    /**
+     * Finds the references to the external objects defined in the EXID fixup
+     * 
+     * @param {string} archives_folder - The path to the archives/ folder of the game
+     * @param {Pak} pak - The parent PAK object, if already loaded (optional, avoid loading the same PAK multiple times)
+     */
+    setupEXID(archives_folder, pak) 
+    {
+        if (!this.fixups.EXID) return
+
+        const findFileInPAK   = (pak, file_hash)   => pak.files.find(e => computeHash(extractName(e.path)) == file_hash)
+        const findObjectInIGZ = (igz, object_hash) => igz.objects.find(e => computeHash(e.name) == object_hash)
+
+        const internal_files = {}
+        const external_paks  = {}
+
+        // Group objects by file, and by pak
+        for (const [index, [object_hash, file_hash]] of Object.entries(this.fixups.EXID.data)) {
+            const file_info = pak != null ? findFileInPAK(pak, file_hash) : null
+
+            if (file_info != null) {
+                internal_files[file_info.path] ??= []
+                internal_files[file_info.path].push({ id: Number(index), object_hash })
+            }
+            else {
+                const file_data = namespace_hashes[file_hash]
+                external_paks[file_data.pak] ??= {}
+                external_paks[file_data.pak][file_data.path] ??= []
+                external_paks[file_data.pak][file_data.path].push({ id: Number(index), object_hash })
+            }
+        }
+
+        const new_exid = []
+
+        const addObjectsFromPak = (pak, files) => {
+            for (const file in files) {
+                const file_infos = pak.files.find(e => e.path == file)
+                const igz = IGZ.fromFileInfos(file_infos)
+
+                for (const {id, object_hash} of files[file]) {
+                    const object = findObjectInIGZ(igz, object_hash)
+                    if (object == null) console.warn('Object not found: ' + file)
+                    new_exid[id] = [object?.name ?? '<ERROR>', file]
+                }
+            }
+        }
+
+        // Add objects from current pak
+        if (pak != null) 
+            addObjectsFromPak(pak, internal_files)
+
+        // Add objects from external paks
+        for (const pak_path in external_paks) {
+            const external_pak = Pak.fromFile(join(archives_folder, pak_path))
+            addObjectsFromPak(external_pak, external_paks[pak_path])
+        }
+
+        this.fixups.EXID.data = new_exid
+    }
+
     buildONAM() {
         return [ this.objects.find(e => e.type == 'igNameList').offset ]
     }
@@ -448,7 +513,7 @@ class IGZ {
             children: unreferenced.map(e => e.toNodeTree())
         }, {
             text: rootText,
-            children: root.map(e => e.toNodeTree(recursive)),
+            children: root.length > 0 ? root.map(e => e.toNodeTree(recursive)) : [{text: 'None'}],
         }]
     }
 

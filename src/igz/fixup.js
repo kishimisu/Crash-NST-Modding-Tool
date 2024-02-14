@@ -81,10 +81,17 @@ class Fixup {
                 data.push(int)
             }
         }
-        else if (intPairFixups.includes(this.type)) {
+        else if (this.type == 'EXNM') {
             // Int16 pairs
             for (let i = 0; i < this.item_count; i++) {
                 const pair = [ bytesToUInt16(fixupData, i * 8), bytesToUInt16(fixupData, i * 8 + 4) ]
+                data.push(pair)
+            }
+        }
+        else if (this.type == 'EXID') {
+            // Int32 pairs
+            for (let i = 0; i < this.item_count; i++) {
+                const pair = [ bytesToUInt(fixupData, i * 8), bytesToUInt(fixupData, i * 8 + 4) ]
                 data.push(pair)
             }
         }
@@ -151,7 +158,7 @@ class Fixup {
                         if (object.offset > 0) text += ` [+ 0x${object.offset.toString(16).toUpperCase()}]`
                     }
                 }
-                else text += e
+                else text += typeof(e) == 'object' ? `${e[1]}: ${e[0]}` : e
 
                 return { 
                     text, 

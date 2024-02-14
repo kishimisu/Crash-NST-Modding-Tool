@@ -172,6 +172,7 @@ class Main {
 
         try {
             igz = IGZ.fromFileInfos(pak.files[fileIndex])
+            igz.setupEXID(getArchiveFolder(), pak)
         }
         catch (e) {
             igz = null
@@ -438,6 +439,7 @@ function loadIGZ(filePath)
     try {
         Main.setPak(null)
         igz = IGZ.fromFile(filePath)
+        igz.setupEXID(getArchiveFolder())
         Main.igz = igz
         Main.showIGZTree()
 

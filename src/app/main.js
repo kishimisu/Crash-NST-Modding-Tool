@@ -24,8 +24,11 @@ app.whenReady().then(() => {
     ipcMain.handle('open-file', showOpenFileDialog)
     ipcMain.handle('save-file', showSaveFileDialog)
     ipcMain.handle('open-folder', showOpenFolderDialog)
-    ipcMain.handle('eval-calculation', evalCalculation)
     ipcMain.handle('create-import-modal', createImportModal)
+    ipcMain.handle('show-confirm-message', showConfirmMessage)
+    ipcMain.on('show-info-message', showInfoMessage)
+    ipcMain.on('show-warning-message', showWarningMessage)
+    ipcMain.on('show-error-message', showErrorMessage)
     ipcMain.on('set-progress-bar', setProgressBar)
     
     createMainWindow()
@@ -114,6 +117,15 @@ function createMainWindow() {
                 {
                     label: 'Restore game folder',
                     click: () => win.webContents.send('menu-restore-game-folder')
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: 'View data as big endian',
+                    type: 'checkbox',
+                    checked: true,
+                    click: (e) => win.webContents.send('menu-toggle-endian', e.checked)
                 },
                 {
                     type: 'separator'
@@ -293,6 +305,23 @@ function setProgressBar(event, file_path, current_file, file_count, message) {
     win.setProgressBar(progress == 1 ? 0 : progress)
 }
 
-function evalCalculation(event, calculation) {
-    return eval(calculation)
+async function showConfirmMessage(event, message) {
+    const { response } = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Yes', 'No'],
+        message
+    })
+    return response == 0
+}
+
+function showInfoMessage(event, message) {
+    dialog.showMessageBox(win, { type: 'info', message })
+}
+
+function showWarningMessage(event, message) {
+    dialog.showMessageBox(win, { type: 'warning', message })
+}
+
+function showErrorMessage(event, title = 'Error', message) {
+    dialog.showErrorBox(title, message)
 }

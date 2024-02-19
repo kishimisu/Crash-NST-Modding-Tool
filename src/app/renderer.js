@@ -9,7 +9,8 @@ import jsonLang from 'highlight.js/lib/languages/json'
 import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
 import FileInfos from '../pak/fileInfos.js'
-import ObjectView, { clearUpdatedData } from './components/object_view.js'
+import ObjectView from './components/object_view.js'
+import { clearUpdatedData } from './components/object_field.js'
 import PakModifiers from './components/utils/modifier.js'
 import { init_file_import_modal } from './components/import_modal.js'
 import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
@@ -28,8 +29,8 @@ window.onload = main
 
 let pak  // Current Pak instance
 let igz  // Current Igz instance 
-let tree // Main tree (left)
-let treePreview // IGZ preview tree (right)
+let tree // Main tree for PAK/IGZ views (left)
+let treePreview // IGZ preview within PAK (right)
 
 // Ordered level name list
 const level_names = levels
@@ -54,6 +55,8 @@ class Main {
     static pak = null
     static igz = null
     static tree = null
+
+    static objectView = null  // IGZ Object edit view (right)
 
     static setPak(_pak) { this.pak = pak = _pak }
 
@@ -110,6 +113,8 @@ class Main {
         tree.get(2).expand()
 
         clearUpdatedData()
+        if (this.objectView) this.showObjectDataView(false)
+
         this.colorizeMainTree()
         this.hideIGZPreview()
         this.setSyntaxHighlightedCode(igz)
@@ -144,9 +149,12 @@ class Main {
         tree.available().forEach(e => {
             // PAK file node
             if (e.type === 'file') {
-                if (pak.files[e.fileIndex].updated)
+                const file = pak.files[e.fileIndex]
+                if (!file.include_in_pkg && !file.path.includes('_pkg'))
+                    e.itree.ref.style.color = '#aaa'
+                else if (file.updated)
                     e.itree.ref.style.color = '#ffaf36'
-                else if (!pak.files[e.fileIndex].original)
+                else if (!file.original)
                     e.itree.ref.style.color = '#21ff78'
                 else
                     e.itree.ref.style.color = defaultColor
@@ -227,7 +235,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.8 - '
+        const title = 'The Apprentice v1.9 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -316,7 +324,7 @@ function onNodeClick(event, node)
             if (fixup && fixup.isEncoded()) {
                 const child = fixup.getCorrespondingObject(node.offset, igz.objects)?.object
                 Main.hideStructView()
-                new ObjectView(child)
+                Main.objectView = new ObjectView(child)
             }
             else {
                 Main.hideStructView()
@@ -327,7 +335,7 @@ function onNodeClick(event, node)
         else if (node.type === 'object') {
             const object = igz.objects[node.objectIndex]
             Main.hideStructView()
-            new ObjectView(object)
+            Main.objectView = new ObjectView(object)
 
             if (elm('#search').value == '') {
                 elm('#search').value = object.getName()
@@ -428,7 +436,7 @@ function loadPAK(filePath)
         console.log('Load', filePath)
     }
     catch (e) {
-        alert('An error occurred while loading the file:\n\n' + e.message)
+        ipcRenderer.send('show-error-message', 'An error occurred while loading the file', e.message)
         throw e
     }
 }
@@ -446,7 +454,7 @@ function loadIGZ(filePath)
         console.log('Load', filePath)   
     }
     catch (e) {
-        alert('An error occurred while loading the file:\n\n' + e.message)
+        ipcRenderer.send('show-error-message', 'An error occurred while loading the file', e.message)
         throw e
     }
 }
@@ -482,7 +490,7 @@ function savePAK(filePath)
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', null)
-        alert('An error occurred while saving the file:\n\n' + e.message)
+        ipcRenderer.send('show-error-message', 'An error occurred while saving the file', e.message)
         throw e
     }
 
@@ -510,8 +518,8 @@ function saveIGZ(filePath)
     igz.save(filePath)
     localStorage.setItem('last_file', filePath)
 
+    if (Main.objectView) Main.objectView.onSave()
     Main.clearAllNodesUpdatedState()
-    clearUpdatedData()
     Main.updateTitle()
 
     // TODO: refresh data view
@@ -531,7 +539,7 @@ function updateIGZWithinPAK()
     igzFile.updated = true
 
     pak.updated = true
-    clearUpdatedData()
+    if (Main.objectView) Main.objectView.onSave()
     Main.clearAllNodesUpdatedState()
     Main.updateTitle()
 
@@ -540,6 +548,9 @@ function updateIGZWithinPAK()
 
 // Import files to the current pak
 async function importToPAK() {
+    if (Main.treeMode == 'igz') return ipcRenderer.send('show-warning-message', 'You can only import files in .pak view')
+    if (pak == null) return
+
     // Select a file
     const file_path = await ipcRenderer.invoke('open-file')
     if (file_path == null) return
@@ -582,11 +593,11 @@ async function importToPAK() {
         try {
             const import_count = pak.importFromPak(import_pak, selection, importDeps, progress_callback)
             ipcRenderer.send('set-progress-bar', null)
-            if (importDeps) alert(`Successfully imported ${import_count} files.`)
+            if (importDeps) ipcRenderer.send('show-info-message', `Successfully imported ${import_count} file${import_count > 1 ? 's' : ''}.`)
         }
         catch (e) {
             ipcRenderer.send('set-progress-bar', null)
-            alert('An error occurred while importing the file:\n\n' + e.message)
+            ipcRenderer.send('show-error-message', 'An error occurred while importing the file', e.message)
             throw e
         }
     }
@@ -602,8 +613,9 @@ async function importToPAK() {
 }
 
 // Revert a .pak file to its original content
-function revertPakToOriginal() {
-    if (!isGameFolderSet()) return alert('Game folder not set')
+async function revertPakToOriginal() {
+    if (!isGameFolderSet()) return ipcRenderer.send('show-warning-message', 'Game folder not set. You can set it in the Settings menu.')
+    if (pak == null) return ipcRenderer.send('show-warning-message', 'No .pak file loaded')
 
     let name = pak.getOriginalArchiveName()
     if (name == null && pak.path.includes('LooseFiles')) name = 'LooseFiles.pak'
@@ -611,15 +623,14 @@ function revertPakToOriginal() {
     const originalPath = getArchiveFolder(name)
 
     if (!existsSync(savedPath)) {
-        alert('No original file found')
-        return
+        return ipcRenderer.send('show-warning-message', 'No backup found for this file.')
     }
 
-    const accept = confirm(`Are you sure you want to revert the following file to its original content?\n\n${originalPath}`)
-    
+    const accept = await ipcRenderer.invoke('show-confirm-message', `Are you sure you want to revert the following file to its original content?\n\n${originalPath}`)
+        
     if (accept) {
         copyFileSync(savedPath, originalPath)
-        alert(`The following file has been reverted to its original content:\n\n${originalPath}`)
+        ipcRenderer.send('show-info-message', `The following file has been reverted to its original content:\n\n${originalPath}`)
     }
 }
 
@@ -627,7 +638,7 @@ function revertPakToOriginal() {
  * Launch the game executable with the selected level
  */
 function launchGame(pak) {
-    if (!isGameFolderSet()) return alert('Game folder not set')
+    if (!isGameFolderSet()) return ipcRenderer.send('show-warning-message', 'Game folder not set. You can set it in the Settings menu.')
 
     const exePath = getGameFolder('CrashBandicootNSaneTrilogy.exe')
     const level = elm('#level-select').value
@@ -638,7 +649,7 @@ function launchGame(pak) {
     elm("#launch-game").disabled = true
     setTimeout(() => elm("#launch-game").disabled = false, 4000)
 
-    if (elm('#use-current-pak').checked && pak.package_igz != null) {
+    if (elm('#use-current-pak').checked && pak?.package_igz != null) {
         // Replace pak in game folder with current pak
         const originalName = pak.getOriginalArchiveName()
         const originalPath = getArchiveFolder(originalName)
@@ -680,7 +691,7 @@ function saveTemporaryAndLaunch({ spawnPoint, spawnCrate }) {
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', null)
-        alert('An error occurred while saving the file:\n\n' + e.message)
+        ipcRenderer.send('show-error-message', 'An error occurred while saving temporary file', e.message)
         throw e
     }
     
@@ -691,11 +702,11 @@ function saveTemporaryAndLaunch({ spawnPoint, spawnCrate }) {
 /**
  * Saves a backup of every .pak file in the game archives/ folder, or restore it
  */
-function backupGameFolder(restore = false) {
+async function backupGameFolder(restore = false) {
     const messages = {
         confirm: {
             true: 'Do you want to restore the game folder to its original state? This will revert all levels to their original content.',
-            false: 'Do you want to backup the game folder? This will allow you to revert any level to its original state.'
+            false: 'Do you want to backup the game folder? It will allow you to revert any level to its original state.\n\nThis will create a 30GB copy of the game folder next to the game executable'
         },
         progress: {
             true: 'Restoring game folder...',
@@ -703,19 +714,19 @@ function backupGameFolder(restore = false) {
         },
         success: {
             true: 'Game folder restored successfully.',
-            false: 'Game folder backed up successfully. You can revert levels with File->Revert'
+            false: 'Game folder backed up successfully. You can revert levels with File -> Revert'
         }
     }
 
-    if (!isGameFolderSet()) return alert('Game folder not set')
+    if (!isGameFolderSet()) return ipcRenderer.send('show-warning-message', 'Game folder not set. You can set it in the Settings menu.')
 
     const backupFolderPath = getBackupFolder()
 
     if (restore && readdirSync(backupFolderPath).length == 0) {
-        return alert('No backup found.')
+        return ipcRenderer.send('show-warning-message', 'No backup found for the game folder.')
     }
 
-    const ok = confirm(messages.confirm[restore])
+    const ok = await ipcRenderer.invoke('show-confirm-message', messages.confirm[restore])
     if (!ok) return
 
     const files = readdirSync(getArchiveFolder())
@@ -726,16 +737,16 @@ function backupGameFolder(restore = false) {
             const originalPath = getArchiveFolder(file)
             const backupPath = getBackupFolder(file)
 
-            ipcRenderer.send('set-progress-bar', file, i, files.length, messages.progress[restore])
+            ipcRenderer.send('set-progress-bar', restore ? originalPath : backupPath, i, files.length, messages.progress[restore])
 
             if (restore) copyFileSync(backupPath, originalPath)
             else copyFileSync(originalPath, backupPath)
         }
-        alert(messages.success[restore])
+        ipcRenderer.send('show-info-message', messages.success[restore])
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', null)
-        alert('An error occurred:\n\n' + e.message)
+        ipcRenderer.send('show-error-message', 'An error occurred', e.message)
         throw e
     }
 }
@@ -747,13 +758,21 @@ async function changeGameFolderPath() {
     const folder = await ipcRenderer.invoke('open-folder')
     if (folder == null) return
     localStorage.setItem('game_folder', folder)
-    backupGameFolder()
+    await backupGameFolder()
+}
+
+/**
+ * Toggles the endianness in the object hex view
+ */
+function toggleEndian(bigEndian) {
+    localStorage.setItem('big-endian', bigEndian)
+    if (Main.objectView) Main.objectView = new ObjectView(Main.objectView.object)
 }
 
 /**
  * Main app window entry point
  */
-function main() 
+async function main() 
 {
     // Create preiew tree (right)
     treePreview = Main.createTree('.tree-preview', { 
@@ -921,10 +940,11 @@ function main()
     })
 
     // (IGZ view) Back to .pak button
-    elm('#back-pak').addEventListener('click', () => {
-        const confirm = !igz.updated || window.confirm('You have unsaved changes. Are you sure you want to go back to the PAK file?')
+    elm('#back-pak').addEventListener('click', async () => {
+        const confirm = !igz.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
         const lastIndex = Main.lastFileIndex
+        pak.updated = false
         Main.showPAKTree()
         Main.restoreTreeExpandedState()
         Main.showIGZPreview(lastIndex)    
@@ -937,7 +957,7 @@ function main()
         const defaultGameFolder = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Crash Bandicoot - N Sane Trilogy\\'
         if (existsSync(defaultGameFolder)) {
             localStorage.setItem('game_folder', defaultGameFolder)
-            backupGameFolder()
+            await backupGameFolder()
         }
     }
     
@@ -962,6 +982,7 @@ ipcRenderer.on('menu-revert' , () => revertPakToOriginal())
 ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
 ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
+ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
 
 window.Main = Main
 

@@ -72,10 +72,16 @@ Relative calculation works with multi-editing and will affect each object's rela
 #### Interesting properties
 When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. These properties will be colored in red. All properties in white have the same value for all other objects of the same type.
 
-#### Copy/Paste
+#### Special properties types
+`Memory Ref`: If you click on properties of type `Memory Ref` (which contains a list of elements), the cell containing the actual data will be focused. If the data is located in another object, this object will be opened. The same is possible for `Raw Ref` types.
+
+#### Additional infos
+Depending on their type, detailed informations are available when hovering the name and type of properties.
+
+#### Copy/Paste (Disabled)
 For complex types like Object References, String Reference, Vectors, Arrays or Matrices, you have the possibility to right-click on a field to copy the value to your clipboard. You can also use it to paste data between properties of the same type.
 
-#### Spawn at Vector
+#### Spawn at Vector (Disabled)
 Two additional options become available when right-clicking on Vector3f properties:
 - Spawn Here : Launches the game while spawning Crash at the selected location, without saving or updating the current archive.
 - Spawn on Crate : Same, but it will also spawn a crate at the specified location.
@@ -87,6 +93,8 @@ The can help you visualize the position of objects in a level.
 **Change the game folder**: You can change the directory of the game in the Settings menu. It should point to the folder containing `CrashBandicootNSaneTrilogy.exe`
 
 **Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
+
+**Change the endianess**: When viewing objects data in an igz, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
 
 
 ## Run the project
@@ -115,7 +123,9 @@ yarn start
 
 - **src/app/main.js**: Electron setup
 - **src/app/renderer.js**: Main app implementation (trees & state for pak & igz views)
-- **src/app/object_view.js**: igObject-view related (hex data, properties list, value editing)
+- **src/app/object_view.js**: Handles the hex view and list of properties for igObject editing.
+- **src/app/field_view.js**: Handle everything related to a property (field)
+- **src/app/utils/metadata.js**: Load and convert igObject types metadata from compressed file
 - **src/app/import_modal.js**: Import modal for a .pak archive (for "Import" & "Replace" button)
 
 ## TODO

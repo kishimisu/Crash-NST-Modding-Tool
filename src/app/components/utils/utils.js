@@ -3,6 +3,13 @@ import { join } from 'path'
 
 const elm = (selector) => document.querySelector(selector)
 
+const createElm = (type, className = '', style = {}) => {
+    const elm = document.createElement(type)
+    elm.className = className
+    Object.entries(style).forEach(([key, value]) => elm.style[key] = value)
+    return elm
+}
+
 const isGameFolderSet = () => localStorage.getItem('game_folder') != null
 
 // Game folder
@@ -34,6 +41,7 @@ const getTempFolder = (...props) => {
 
 export { 
     elm,
+    createElm,
     isGameFolderSet,
     getGameFolder,
     getArchiveFolder,

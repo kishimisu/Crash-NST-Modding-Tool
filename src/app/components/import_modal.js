@@ -14,7 +14,7 @@ function init_file_import_modal(Main, onNodeClick, {file_path, files_data, curre
         files_data.forEach((e, i) => {
             const file = pak.files.find(f => f.path === e.path)
             if (file == null) {
-                pak.files.push(new FileInfos(e))
+                pak.files.push(new FileInfos({ ...e, pak }))
             }
             else if (e.updated) {
                 // Remove data for files that have been updated but not saved yet

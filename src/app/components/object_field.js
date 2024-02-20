@@ -479,7 +479,7 @@ class ObjectField {
         let previous_value = null
         let new_value = null
 
-        if (update_input && this.parent && this.parent.ref_object != object) {
+        if (update_input && this.parent?.type == 'igMemoryRefMetaField' && this.parent.ref_object != object) {
             return ipcRenderer.send('show-warning-message', 'Updating data from other objects not supported yet. Please update the data from its original object.')
         }
 

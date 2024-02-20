@@ -566,6 +566,7 @@ async function importToPAK() {
         const path = folderPath + name
 
         const file = new FileInfos({
+            pak: pak,
             path, full_path: root + path,
             data, size: data.length,
             updated: true,

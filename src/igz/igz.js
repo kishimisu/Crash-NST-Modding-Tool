@@ -268,12 +268,13 @@ class IGZ {
     updatePKG(file_paths) 
     {
         const typesOrder = [
-            'script', 'sound_sample', 'sound_bank', 'lang_file',
-            'texture', 'material_instances', 'vsc', 'igx_file', 
+            'script', 'sound_sample', 'sound_bank', 'lang_file', 'loose', 'shader',
+            'texture', 'material_instances', 'font', 'vsc', 'igx_file', 
             'havokrigidbody', 'model', 'asset_behavior', 
             'havokanimdb', 'hkb_behavior', 'hkc_character', 
             'behavior', 'sky_model', 'effect', 'actorskin', 
             'sound_stream', 'character_events', 'graphdata_behavior', 
+            'character_data', 'gui_project',
             'navmesh', 'igx_entities', 'pkg'
         ]
 

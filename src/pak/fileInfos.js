@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from "fs"
-import { BufferView, bytesToUInt, computeHash, intToBytes } from "../utils"
+import { bytesToUInt16, computeHash, intToBytes } from "../utils"
 import { decompress } from 'lzma'
 import { getCacheFolder, getTempFolder } from "../app/components/utils/utils"
 
 class FileInfos {
-    constructor({ id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {
+    constructor({ pak, id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {
+        this.pak = pak
         this.id = id
         this.offset = offset
         this.ordinal = ordinal
@@ -61,73 +62,68 @@ class FileInfos {
             }
         }
 
-        const CHUNK_SIZE = 32768
-        const CHUNK_ALIGN = 2048
+        const buffer = new Uint8Array(this.size)
+        const numOfBlocks = ((this.size + 0x7FFF) >> 0xF)
 
-        let data = new Uint8Array(this.size)
+        const getBlockInfos = (tableType, blockIndex, mask, shift) => {
+            const table       = this.pak.block_tables[tableType]
+            const block       = table[blockIndex]
+            const blockOffset = (block & mask) * this.pak.sector_size
+            const compressed  = (block >> shift) == 1
+            const blockSize   = (table[blockIndex + 1] & mask) * this.pak.sector_size - blockOffset
 
-        const checkArraySize = (size) => {
-            if (data_length + size > this.size) {
-                // Resize data array
-                let new_buffer = new Uint8Array(data_length + size)
-                new_buffer.set(data)
-                data = new_buffer
-                console.warn('Decompressed size bigger than expected, increasing buffer length...')
-            }
+            return { blockOffset, compressed, blockSize }
         }
 
-        const reader = new BufferView(new Uint8Array(this.data))
+        for (let blockReadIndex = 0; blockReadIndex < numOfBlocks; blockReadIndex++) {
+            const blockIndex = (this.compression & 0xfffffff) + blockReadIndex
+            let blockInfos
 
-        let data_length = 0
-        while(data_length < this.size) {
-            // Try to read lzma header
-            const stream_size    = reader.readUInt16()
-            const properties     = reader.readByte()
-            const dictionarySize = reader.readBytes(4)
-
-            if (properties != 93 || bytesToUInt(dictionarySize) != CHUNK_SIZE) {
-                reader.seek(reader.offset - 7)
-
-                checkArraySize(CHUNK_SIZE)
-                data.set(this.data.slice(reader.offset, reader.offset + CHUNK_SIZE), data_length)
-                data_length += CHUNK_SIZE
-
-                reader.seek(reader.offset + CHUNK_SIZE)
+            if (this.size <= 0x7f * this.pak.sector_size) {
+                blockInfos = getBlockInfos('small', blockIndex, 0x7f, 0x7)
+            }
+            else if (this.size <= 0x7fff * this.pak.sector_size) {
+                blockInfos = getBlockInfos('medium', blockIndex, 0x7fff, 0xf)
             }
             else {
-                // Compute uncompressed chunk size
-                const chunk_size = Math.min(this.size - data_length, CHUNK_SIZE)
-                const uncompressed_size = intToBytes(chunk_size, 8) // Int64 byte array representation
-                const stream = this.data.slice(reader.offset, reader.offset + stream_size)
-
-                // https://svn.python.org/projects/external/xz-5.0.3/doc/lzma-file-format.txt
-                const lzma_data = [
-                    /// Header
-                    properties, ...dictionarySize, ...uncompressed_size,
-                    // Compressed data
-                    ...stream
-                ]
-                
-                // Decompress chunk
-                const chunk = decompress(lzma_data)
-
-                checkArraySize(chunk.length)
-                data.set(chunk, data_length)
-                data_length += chunk.length
-
-                // Advance to next chunk
-                reader.seek(reader.offset + stream_size)
-                const padding = CHUNK_ALIGN - reader.offset % CHUNK_ALIGN
-                reader.seek(reader.offset + padding)
+                blockInfos = getBlockInfos('large', blockIndex, 0x7fffffff, 0x1f)
             }
+
+            const { blockOffset, compressed } = blockInfos
+
+            const decompressedSize = (this.size < (blockReadIndex + 1) * 0x8000) ? this.size & 0x7fff : 0x8000
+            const compressionType = compressed ? (this.compression >> 0x1c) : 0
+
+            this.decompressBlock(blockReadIndex * 0x8000, decompressedSize, compressionType, blockOffset, buffer)
         }
 
         if (needs_caching) {
             // Cache decompressed data
-            writeFileSync(getCacheFolder(this.id), data)
+            writeFileSync(getCacheFolder(this.id), buffer)
         }
+        
+        return buffer
+    }
 
-        return data
+    decompressBlock(offset, decompressedSize, compression, sourceOffset, destination) {
+        if (compression == 0) {
+            destination.set(this.data.slice(sourceOffset, sourceOffset + decompressedSize), offset)
+        }
+        else if (compression == 2) {
+            const compressedSize = bytesToUInt16(this.data, sourceOffset)
+            const properties     = this.data.slice(sourceOffset + 2, sourceOffset + 7)
+            const stream         = this.data.slice(sourceOffset + 7, sourceOffset + 7 + compressedSize)
+
+            const lzma_data = new Uint8Array(13 + compressedSize)
+            lzma_data.set(properties, 0)
+            lzma_data.set(intToBytes(decompressedSize, 8), 5)
+            lzma_data.set(stream, 13)
+            
+            // Decompress chunk
+            const chunk = decompress(lzma_data).slice(0, decompressedSize)
+            destination.set(chunk, offset)
+        }
+        else throw new Error('decompressBlock: Unknown compression type: ' + compression)
     }
 
     computeHash() {

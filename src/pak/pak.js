@@ -10,15 +10,23 @@ const HEADER_SIZE   = 56
 const SECTOR_SIZE   = 2048
 
 const FILE_COUNT_LOC   = 12
+const SECTOR_SIZE_LOC  = 16
+const BLOCK_TABLES_LOC = 28
 const NAMES_OFFSET_LOC = 40
 const NAMES_SIZE_LOC   = 48
 
 class Pak {    
     constructor({ files = [], path } = {}) {
-        this.files = files.map(e => new FileInfos(e))
+        this.files = files.map(e => new FileInfos({ ...e, pak: this }))
         this.path = path
         this.updated = false
         this.package_igz = null // Reference to the package file (ArchiveName_pkg.igz) as IGZ object
+
+        this.block_tables = {
+            large:  [],
+            medium: [],
+            small:  []
+        }
     }
 
     /** Construct from .pak file path
@@ -38,8 +46,14 @@ class Pak {
 
         /// Read Header ///
 
-        const file_count   = reader.readUInt(FILE_COUNT_LOC)
-        const names_offset = reader.readUInt(NAMES_OFFSET_LOC)
+        const file_count        = reader.readUInt(FILE_COUNT_LOC)
+        const names_offset      = reader.readUInt(NAMES_OFFSET_LOC)
+        const sector_size       = reader.readUInt(SECTOR_SIZE_LOC)
+        const num_large_blocks  = reader.readUInt(BLOCK_TABLES_LOC)
+        const num_medium_blocks = reader.readUInt()
+        const num_small_blocks  = reader.readUInt()
+
+        this.sector_size = sector_size
 
         /// Read Files ///
 
@@ -64,14 +78,17 @@ class Pak {
             const full_path = reader.readStr(names_offset + file_name_offset)
             const path = reader.readStr()
 
-            const file = new FileInfos({ id, offset, ordinal, size, compression, full_path, path, data })
-
-            // Find package file
-            if (path.includes('_pkg.igz')) 
-                this.package_igz = IGZ.fromFileInfos(file)
+            const file = new FileInfos({ pak: this, id, offset, ordinal, size, compression, full_path, path, data })
 
             this.files.push(file)
         }
+
+        /// Read Block Tables ///
+
+        reader.seek(HEADER_SIZE + file_count * 20)
+        for (let i = 0; i < num_large_blocks; i++)  this.block_tables.large.push(reader.readUInt())
+        for (let i = 0; i < num_medium_blocks; i++) this.block_tables.medium.push(reader.readUInt16())
+        for (let i = 0; i < num_small_blocks; i++)  this.block_tables.small.push(reader.readUInt8())
 
         /// Read custom data ///
 
@@ -84,9 +101,17 @@ class Pak {
             }
         }
 
-        // Check if files are included in the package file
-        for (const file of this.files) {
-            file.include_in_pkg = this.package_igz?.fixups.TSTR.data.includes(file.path.toLowerCase())
+        // Read package file ///
+        
+        const package_file = this.files.find(e => e.path.endsWith('_pkg.igz'))
+
+        if (package_file != null) {
+            this.package_igz = IGZ.fromFileInfos(package_file)
+
+            // Check which files are included in the package file
+            for (const file of this.files) {
+                file.include_in_pkg = this.package_igz.fixups.TSTR?.data.includes(file.path.toLowerCase())
+            }
         }
     }
 
@@ -145,7 +170,6 @@ class Pak {
 
             file.offset  = writer.offset
             file.ordinal = ordinal
-            file.size    = file_data.length
 
             writer.setBytes(file_data)
             alignOffset()
@@ -362,6 +386,7 @@ class Pak {
             ...this.files[index],
             size: new_data.length,
             data: new_data,
+            compression: 0xFFFFFFFF,
             full_path: updatePath(file.full_path),
             path: updatePath(file.path),
             original: false,

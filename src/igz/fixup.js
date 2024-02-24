@@ -81,14 +81,7 @@ class Fixup {
                 data.push(int)
             }
         }
-        else if (this.type == 'EXNM') {
-            // Int16 pairs
-            for (let i = 0; i < this.item_count; i++) {
-                const pair = [ bytesToUInt16(fixupData, i * 8), bytesToUInt16(fixupData, i * 8 + 4) ]
-                data.push(pair)
-            }
-        }
-        else if (this.type == 'EXID') {
+        else if (this.type == 'EXID' || this.type == 'EXNM') {
             // Int32 pairs
             for (let i = 0; i < this.item_count; i++) {
                 const pair = [ bytesToUInt(fixupData, i * 8), bytesToUInt(fixupData, i * 8 + 4) ]

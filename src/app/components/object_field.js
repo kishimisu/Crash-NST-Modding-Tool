@@ -350,10 +350,10 @@ class ObjectField {
         this.colorized = inROFS || inRNEX || inREXT
         let input
 
-        if (inRNEX || inREXT) {
-            const fixup   = inRNEX ? 'EXNM' : 'EXID'
+        if (inRNEX || inREXT) { 
+            const fixup   = inRNEX ? 'RNEX' : 'REXT'
             const index   = this.object.view.readInt(this.offset)
-            const data    = Main.igz.fixups[fixup]?.data ?? []
+            const data    = inRNEX ? Main.igz.named_externals : Main.igz.named_handles
 
             const mapName = (type) => (name, id) => ({ name: name[0], path: name[1], id, type })
             const names       = data.map(mapName(fixup))
@@ -381,12 +381,15 @@ class ObjectField {
     }
 
     createHandleInput() {
-        const exnm = Main.igz.fixups.EXNM?.data ?? []
         const exid = Main.igz.fixups.EXID?.data ?? []
 
+        const inRHND = Main.igz.fixups.RHND?.data.includes(this.object.offset + this.offset)
+        const index = this.object.view.readInt(this.offset) >>> 0
+        const isHandle = index & 0x80000000
+
         const mapName = (type) => (name, id) => ({ name: name[0], path: name[1], id, type })
-        const names = exnm.map(mapName('EXNM')).concat(exid.map(mapName('EXID')))
-        const short_names = names.map(e => `${e.path.slice(e.path.lastIndexOf('/') + 1)}::${e.name}`)
+        const names = isHandle ? Main.igz.named_handles.map(mapName('EXNM')) : exid.map(mapName('EXID'))
+        const short_names = names.map(e => `${typeof(e) == 'string' ? e.path.slice(e.path.lastIndexOf('/') + 1) : e.path}::${e.name}`)
         const full_names  = names.map(e => `|${e.type}| ${e.path} :: ${e.name}`)
 
         // Handle ID => name index
@@ -406,8 +409,6 @@ class ObjectField {
             return fixup_id
         }
 
-        const inRHND = Main.igz.fixups.RHND?.data.includes(this.object.offset + this.offset)
-        const index = this.object.view.readInt(this.offset) >>> 0
         const value = inRHND ? decodeIndex(index) : '--- None ---'
         const input = this.createCustomListInput([short_names, full_names], value)
 
@@ -609,7 +610,7 @@ class ObjectField {
             'DotNetDataMetaField':      8,
             'igVec2fMetaField':         8,
             'igVec3fMetaField':         12,
-            'igVertexElementMetaField': 16,
+            'igVertexElementMetaField': 12,
             'igVec4fMetaField':         16,
             'igNameMetaField':          16,
             'igMatrix44fMetaField':     64,

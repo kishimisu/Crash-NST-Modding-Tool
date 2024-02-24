@@ -172,6 +172,10 @@ class ObjectView {
         this.container.onmouseleave = () => this.onMouseLeave()
         Main.showObjectDataView(true)
 
+        if (this.object.type == 'CVscComponentData') {
+            this.createCommonSpawnerTemplate()
+        }
+
         // Setup MemoryRef fields
         for (const field of this.fields) {
             if (field.type == 'igMemoryRefMetaField') {
@@ -291,6 +295,46 @@ class ObjectView {
 
         updateField(values)
         updateField(keys)
+    }
+
+    createCommonSpawnerTemplate() {
+        let offset = this.object.view.readInt(0x18) - this.object.offset
+        const _metaObject = this.object.view.readInt(0x20)
+        const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
+        const handle = Main.igz.named_externals[_metaObject]
+
+        if (!inRNEX || handle[0] != 'common_Spawner_TemplateData') return
+
+        const fields = [
+            { name: 'ActivateCheckpointLoad', type: 'igBoolMetaField', size: 1 },
+            { name: 'ActivateOnSpawn', type: 'igBoolMetaField', size: 1 },
+            { name: 'RespawnOnDeath', type: 'igBoolMetaField', size: 1 },
+            { name: 'SpawnOnEnter', type: 'igBoolMetaField', size: 1 },
+            { name: 'WaitForSpawnTemplateEvent', type: 'igBoolMetaField', size: 4 },
+            { name: 'SpawnAtEntity', type: 'igHandleMetaField', size: 8 },
+            { name: 'UsedEntityToSpawn', type: 'igHandleMetaField', size: 8 },
+            { name: 'TriggerVolume', type: 'igHandleMetaField', size: 8 },
+            { name: 'EntityToSpawn', type: 'igHandleMetaField', size: 8 },
+            { name: 'InitialDelay', type: 'igFloatMetaField', size: 4 },
+            { name: 'DeathRespawnTimer', type: 'igFloatMetaField', size: 4 },
+            { name: 'Bool_id_j3kcr18d', type: 'igBoolMetaField', size: 1 },
+            { name: 'Bool_id_o8p58cmq', type: 'igBoolMetaField', size: 1 },
+            { name: 'NewEnum11_id_6xic0fuw', type: 'igEnumMetaField', size: 2 },
+            { name: 'Bool_id_x2ny9dmw', type: 'igBoolMetaField', size: 4 },
+            { name: 'Bool_id_9b50frs9', type: 'igBoolMetaField', size: 4 },
+            { name: 'Bool_id_tm3edvov', type: 'igBoolMetaField', size: 4 },
+        ]
+        .map(e => {
+            offset += e.size
+            return new ObjectField({
+                object: this.object,
+                offset: offset - e.size,
+                refType: e.type == 'igObjectRefMetaField' ? 'CEntity' : null,
+                ...e,
+            })
+        })
+
+        this.fields.push(...fields)
     }
 
     // Update an object's data when a field is modified

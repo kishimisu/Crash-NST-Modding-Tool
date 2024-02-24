@@ -22,6 +22,9 @@ class IGZ {
         this.fixups = {}
         this.objects = []
 
+        this.named_handles   = [] // EXNM handles
+        this.named_externals = [] // EXNM externals
+
         this.objectList = null // igObjectList (this.objects[0])
         this.nameList = null   // igNameList
         this.initialize(new Uint8Array(igz_data))
@@ -91,7 +94,18 @@ class IGZ {
     
         if (this.fixups.EXNM) {
             // Init EXNM fixup data
-            this.fixups.EXNM.data = this.fixups.EXNM.data.map(([a, b]) => ([this.fixups.TSTR.data[a], this.fixups.TSTR.data[b]]))
+            this.fixups.EXNM.data.forEach(([a, b], i) => {
+                const object    = this.fixups.TSTR.data[a]
+                const namespace = this.fixups.TSTR.data[b & 0x7FFFFFFF]
+                const isHandle = (b & 0x80000000) != 0
+
+                if (isHandle) 
+                    this.named_handles.push([object, namespace])
+                else 
+                    this.named_externals.push([object, namespace])
+
+                this.fixups.EXNM.data[i] = [ object, (isHandle ? 'Handle | ' : 'External | ') + namespace ]
+            })
         }
 
         /// Objects (Chunk 1) ///
@@ -380,7 +394,7 @@ class IGZ {
 
                 if (file_data == null) {
                     console.warn(`File not found: ${index}, ${file_hash}, ${object_hash}`)
-                    new_exid[index] = ['File Not Found', 'Error']
+                    new_exid[index] = [object_hash.toString(), file_hash.toString()]
                     continue
                 }
 
@@ -509,15 +523,48 @@ class IGZ {
             rootText = 'All Objects'
         }
 
+        // Group objects by type
+        if (root.length > 0) {
+            const uniqueTypes    = Array.from(new Set(root.map(e => e.type)))
+            const objectsPerType = Object.fromEntries(uniqueTypes.map(e => ([e, []])))
+            root.forEach(e => objectsPerType[e.type].push(e))
+
+            const singleChildren = []
+            const new_root = []
+            
+            uniqueTypes.forEach(type => {
+                const objects = objectsPerType[type]
+
+                if (objects.length == 1) {
+                    singleChildren.push(objects[0])
+                    return null
+                }
+
+                new_root.push({
+                    text: `${type} (${objects.length})`,
+                    children: objects.map(e => e.toNodeTree(recursive))
+                })
+            })
+
+            root = new_root
+            if (singleChildren.length > 0)
+                root.push({
+                    text: (new_root.length > 0 ? 'Other Objects' : rootText) + ` (${singleChildren.length})`,
+                    children: singleChildren.map(e => e.toNodeTree(recursive))
+                })
+        }
+        else {
+            root = [{text: 'No Objects'}]
+        }
+
         return [{
-            text: 'Fixups',
+            text: '[Fixups]',
             children: Object.values(this.fixups).map(e => e.toNodeTree(this.objects)),
-        }, {
-            text: 'Unreferenced objects',
+        },
+            ...root,
+        {
+            text: `Unreferenced Objects (${unreferenced.length})`,
             children: unreferenced.map(e => e.toNodeTree())
-        }, {
-            text: rootText,
-            children: root.length > 0 ? root.map(e => e.toNodeTree(recursive)) : [{text: 'None'}],
         }]
     }
 

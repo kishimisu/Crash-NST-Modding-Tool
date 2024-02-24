@@ -110,7 +110,8 @@ class Main {
         this.treeMode = 'igz'
         tree.load([]) 
         tree.load(igz.toNodeTree())
-        tree.get(2).expand()
+        if (tree.nodes().length == 3)
+            tree.get(1).expand()
 
         clearUpdatedData()
         if (this.objectView) this.showObjectDataView(false)
@@ -144,7 +145,7 @@ class Main {
 
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree() {
-        const defaultColor = 'white'
+        const defaultColor = '#fefefe'
 
         tree.available().forEach(e => {
             // PAK file node
@@ -266,7 +267,7 @@ class Main {
 
     static saveTreeExpandedState() {
         this.lastCollapsedState = tree.available().map(e => e.expanded())
-        this.lastFileIndex = tree.lastSelectedNode().fileIndex
+        this.lastFileIndex = tree.lastSelectedNode()?.fileIndex
     }
 
     static restoreTreeExpandedState() {
@@ -828,6 +829,7 @@ async function main()
         elm('#level-select').appendChild(option)
     })
     elm('#level-select').value = localStorage.getItem('last_level') ?? level_names[1]
+    elm('#level-select').onchange = () => launchGame(pak)
     
     /// Buttons
 

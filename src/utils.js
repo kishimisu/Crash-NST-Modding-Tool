@@ -43,8 +43,8 @@ class BufferView {
     readFloat  = (offset) => this.getValue('getFloat32', 4, offset)
     readInt16  = (offset) => this.getValue('getInt16', 2, offset)
     readUInt16 = (offset) => this.getValue('getUint16', 2, offset)
-    readVector    = (offset, size) => new Array(size).fill(0).map((_, i) => this.readFloat(i == 0 ? offset : null))
-    readVectorInt = (offset, size) => new Array(size).fill(0).map((_, i) => this.readInt(i == 0 ? offset : null))
+    readVector    = (size, offset) => new Array(size).fill(0).map((_, i) => this.readFloat(i == 0 ? offset : null))
+    readVectorInt = (size, offset) => new Array(size).fill(0).map((_, i) => this.readInt(i == 0 ? offset : null))
     readByte   = (offset) => this.getValue('getUint8', 1, offset)
     readInt8   = (offset) => this.getValue('getInt8', 1, offset)
     readUInt8  = this.readByte
@@ -112,6 +112,10 @@ function formatSize(number) {
     return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + ' bytes'
 }
 
+function isVectorZero(vector) {
+    return vector.every(e => e == 0)
+}
+
 /**
  * Computes the hash for a file path, file name or object name
  * https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
@@ -146,5 +150,6 @@ export {
     bitRead,
     formatSize,
     computeHash,
-    extractName
+    extractName,
+    isVectorZero
 }

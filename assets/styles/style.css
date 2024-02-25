@@ -43,6 +43,7 @@ body {
   flex-grow: 1;
   flex-direction: column;
   overflow-y: auto;
+  font-weight: 300;
 }
 
 #tree-selector {
@@ -169,6 +170,8 @@ select {
   border-left: 1px solid white;
   padding-inline: 10px;
   margin-top: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .section-title {
@@ -369,6 +372,24 @@ td.hex-flash {
   color: rgb(255, 240, 145);
   font-size: .7rem;
   font-weight: 200;
+  width: 100%;
+}
+
+#focus-in-explorer {
+  display: none;
+  white-space: nowrap;
+  height: fit-content;
+  background: #191919;
+  border: none;
+  color: #fefefe;
+  padding: 5px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  font-family: Chivo;
+}
+
+#focus-in-explorer:hover {
+  background: #333;
 }
 
 /* Tree Preview */
@@ -421,6 +442,25 @@ td.hex-flash {
   background: #333;
   color: #888;
   cursor: default;
+}
+
+/* Level Explorer */
+#explorer {
+  display: none;
+  position: relative;
+}
+
+#explorer > canvas {
+  width: 100%;
+  aspect-ratio: 16/9;
+}
+
+#hide-explorer {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 /* Stylize scrollbar */

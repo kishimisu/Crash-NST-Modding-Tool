@@ -462,11 +462,11 @@ class ObjectField {
     // Goto the referenced object and focus the corresponding cell in the hex view
     onMemoryRefClick() {
         // Focus in hex view
-        const view = this.object == this.ref_object ? Main.objectView : new ObjectView(this.ref_object)
-        const refCell = view.hexCells.find(e => e.offset == this.ref_data_offset)
+        if (this.object != this.ref_object) Main.objectView = new ObjectView(this.ref_object)
+        const refCell = Main.objectView.hexCells.find(e => e.offset == this.ref_data_offset)
 
         if (refCell) {
-            view.setSelected(refCell.fields[0], refCell, true)
+            Main.objectView.setSelected(refCell.fields[0], refCell, true)
             refCell.element.scrollIntoViewIfNeeded()
         }
 

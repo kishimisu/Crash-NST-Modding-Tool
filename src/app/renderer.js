@@ -10,6 +10,7 @@ import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
 import FileInfos from '../pak/fileInfos.js'
 import ObjectView from './components/object_view.js'
+import LevelExplorer from './components/level_explorer.js'
 import { clearUpdatedData } from './components/object_field.js'
 import PakModifiers from './components/utils/modifier.js'
 import { init_file_import_modal } from './components/import_modal.js'
@@ -58,7 +59,10 @@ class Main {
 
     static objectView = null  // IGZ Object edit view (right)
 
+    static levelExplorer = new LevelExplorer()
+
     static setPak(_pak) { this.pak = pak = _pak }
+    static setIGZ(_igz) { this.igz = igz = _igz }
 
     static createMainTree(props) { 
         return this.tree = tree = this.createTree('.tree', props) 
@@ -92,6 +96,7 @@ class Main {
 
         // Reset right panel
         this.showObjectDataView(false)
+        this.levelExplorer.deselectObject()
 
         if (igz != null) this.showFileButtons(true)
 
@@ -207,6 +212,20 @@ class Main {
         this.showFileButtons(false)
     }
 
+    static initLevelExplorer() {
+        if (Main.pak == null) return ipcRenderer.send('show-warning-message', 'This feature is only available in .pak files.')
+        
+        try {
+            if (pak == this.levelExplorer.pak) 
+                return this.levelExplorer.toggleVisibility(true)
+            this.levelExplorer.init()
+        } catch (e) {
+            ipcRenderer.send('set-progress-bar', null)
+            ipcRenderer.send('show-error-message', 'An error occurred while loading the level explorer', e.message)
+            throw e
+        }
+    }
+
     // Set syntax highlighted code in JSON view
     static setSyntaxHighlightedCode(object) {
         if (object.toString() !== '[object Object]') object = object.toString()
@@ -230,13 +249,13 @@ class Main {
         elm('#data-table').innerHTML = ''
         elm('#data-view').style.display = visible ? 'flex' : 'none'
         elm('#object-view-ctn').style.display = visible ? 'block' : 'none'
-        elm('#objects-fields-title').style.display = visible ? 'block' : 'none'
+        elm('#objects-fields-title').style.display = visible ? 'flex' : 'none'
     }
 
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.9 - '
+        const title = 'The Apprentice v1.11 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -267,7 +286,7 @@ class Main {
 
     static saveTreeExpandedState() {
         this.lastCollapsedState = tree.available().map(e => e.expanded())
-        this.lastFileIndex = tree.lastSelectedNode()?.fileIndex
+        this.lastFileIndex = tree.lastSelectedNode()?.fileIndex ?? this.lastFileIndex
     }
 
     static restoreTreeExpandedState() {
@@ -428,6 +447,7 @@ function loadPAK(filePath)
         }
         elm('#level-select').value = findLevelName(newPAK.getOriginalArchiveName()) ?? level_names[1]
 
+        Main.levelExplorer.toggleVisibility(false)
         Main.igz = igz = null
         Main.setPak(newPAK)
         Main.showPAKTree()
@@ -446,6 +466,7 @@ function loadPAK(filePath)
 function loadIGZ(filePath) 
 {
     try {
+        Main.levelExplorer.toggleVisibility(false)
         Main.setPak(null)
         igz = IGZ.fromFile(filePath)
         igz.setupEXID(getArchiveFolder())
@@ -486,8 +507,9 @@ async function saveFile(saveAs = false)
 function savePAK(filePath) 
 {   
     try {
+        const title = 'Saving ' + filePath
         const message = 'This will take some time on the first time saving a new archive.' 
-        pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', filePath, current_file, file_count, message))
+        pak.save(filePath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', current_file, file_count, title, message))
     }
     catch (e) {
         ipcRenderer.send('set-progress-bar', null)
@@ -589,8 +611,9 @@ async function importToPAK() {
         // Import files to the current pak
         const import_pak = Pak.fromFile(file_path)
 
+        const title = 'Importing from ' + file_path
         const message = 'Importing files to PAK...'
-        const progress_callback = (path, current, total) => ipcRenderer.send('set-progress-bar', path, current, total, message)
+        const progress_callback = (path, current, total) => ipcRenderer.send('set-progress-bar', current, total, title, 'Importing ' + path, 'files imported')
 
         try {
             const import_count = pak.importFromPak(import_pak, selection, importDeps, progress_callback)
@@ -655,7 +678,7 @@ function launchGame(pak) {
         // Replace pak in game folder with current pak
         const originalName = pak.getOriginalArchiveName()
         const originalPath = getArchiveFolder(originalName)
-        console.log(`Replaced ${originalPath} with ${pak.path}`)
+        console.log(`Replaced ${originalName} with ${pak.path}`)
         copyFileSync(pak.path, originalPath)
     }
 
@@ -676,32 +699,6 @@ function saveAndLaunch() {
 }
 
 /**
- * Saves a temporary version of the current archive with applied modifiers, 
- * then launch the game. The original archive is not modified
- */
-function saveTemporaryAndLaunch({ spawnPoint, spawnCrate }) {
-    if (pak == null) return
-
-    const tmpPak  = Pak.fromFile(pak.path)
-    const tmpPath = getTempFolder(pak.getOriginalArchiveName())
-
-    new PakModifiers(tmpPak, { spawnPoint, spawnCrate }).apply()
-    
-    try {
-        const message = 'Saving temporary archive...' 
-        tmpPak.save(tmpPath, (current_file, file_count) => ipcRenderer.send('set-progress-bar', tmpPath, current_file, file_count, message))
-    }
-    catch (e) {
-        ipcRenderer.send('set-progress-bar', null)
-        ipcRenderer.send('show-error-message', 'An error occurred while saving temporary file', e.message)
-        throw e
-    }
-    
-    tmpPak.path = tmpPath
-    launchGame(tmpPak)
-}
-
-/**
  * Saves a backup of every .pak file in the game archives/ folder, or restore it
  */
 async function backupGameFolder(restore = false) {
@@ -710,7 +707,7 @@ async function backupGameFolder(restore = false) {
             true: 'Do you want to restore the game folder to its original state? This will revert all levels to their original content.',
             false: 'Do you want to backup the game folder? It will allow you to revert any level to its original state.\n\nThis will create a 30GB copy of the game folder next to the game executable'
         },
-        progress: {
+        title: {
             true: 'Restoring game folder...',
             false: 'Backing up game folder...'
         },
@@ -739,7 +736,7 @@ async function backupGameFolder(restore = false) {
             const originalPath = getArchiveFolder(file)
             const backupPath = getBackupFolder(file)
 
-            ipcRenderer.send('set-progress-bar', restore ? originalPath : backupPath, i, files.length, messages.progress[restore])
+            ipcRenderer.send('set-progress-bar', i, files.length, messages.title[restore], restore ? 'Restoring ' + file : 'Backing up ' + file)
 
             if (restore) copyFileSync(backupPath, originalPath)
             else copyFileSync(originalPath, backupPath)
@@ -761,6 +758,17 @@ async function changeGameFolderPath() {
     if (folder == null) return
     localStorage.setItem('game_folder', folder)
     await backupGameFolder()
+}
+
+/**
+ *  Updates the igz model extractor path
+ */
+async function changeModelExtractorPath() {
+    const path = await ipcRenderer.invoke('open-file', ['exe'])
+    if (path == null) return
+    localStorage.setItem('model-extractor-path', path)
+    const ok = await ipcRenderer.invoke('show-confirm-message', 'The model extractor path has been updated. Would you like to reload the app to apply the changes?')
+    if (ok) document.location.reload()
 }
 
 /**
@@ -799,6 +807,7 @@ async function main()
     tree.on('node.click', onNodeClick)
     tree.on('node.dblclick', (event, node) => {
         if (node.type === 'file') {
+            Main.lastFileIndex = node.fileIndex
             Main.showIGZTree() // Open IGZ from PAK on double click
         }
     })
@@ -987,8 +996,11 @@ ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
 
-window.Main = Main
+ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
+ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())
+ipcRenderer.on('menu-toggle-load-models', (_, checked) => Main.levelExplorer.toggleLoadModels(checked))
+ipcRenderer.on('menu-toggle-show-splines', (_, checked) => Main.levelExplorer.toggleShowSplines(checked))
+ipcRenderer.on('menu-toggle-show-entity-links', (_, checked) => Main.levelExplorer.toggleShowEntityLinks(checked))
+ipcRenderer.on('menu-toggle-show-all-objects', (_, checked) => Main.levelExplorer.toggleShowAllObjects(checked))
 
-export {
-    saveTemporaryAndLaunch
-}
+window.Main = Main

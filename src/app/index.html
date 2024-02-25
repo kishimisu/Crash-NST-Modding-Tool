@@ -37,6 +37,12 @@
         
         <!-- Right Area -->
         <div id="right-area">
+            <!-- Level Explorer -->
+            <div id="explorer">
+                <canvas id="canvas"></canvas>
+                <div id="hide-explorer">Hide Explorer</div>
+            </div>
+
             <!-- Hex Data View -->
             <div id="data-view">
                 <div id="object-name">Object data</div>
@@ -46,11 +52,12 @@
             </div>
 
             <!-- Fields View Header -->
-            <div id="objects-fields-title" style="display: none;">
+            <div id="objects-fields-title" style="display: none; justify-content: space-between;">
                 <div id="apply-all">
                     <label for="apply-all-checkbox">Apply changes to all search results?</label>
                     <input type="checkbox" id="apply-all-checkbox" />
                 </div>
+                <button id="focus-in-explorer">Focus in explorer</button>
             </div>
 
             <!-- Fields View -->
@@ -62,13 +69,6 @@
             <div id="data-struct">
                 <div class="section-title">Object structure</div>
                 <pre><code id="data" class="language-json"></code></pre>
-            </div>
-
-            <div id="context-menu">
-                <button id="copy-field" class="tree-preview-btn">Copy value</button>
-                <button id="paste-field" class="tree-preview-btn">Paste value</button>
-                <button id="spawn-here" class="tree-preview-btn">Spawn here</button>
-                <button id="spawn-on-crate" class="tree-preview-btn">Spawn on crate</button>
             </div>
 
             <!-- Tree Preview -->
@@ -91,6 +91,14 @@
                 </div>
                 <div class="tree-preview"></div>
             </div>
+
+            <!-- Context Menu -->
+            <!-- <div id="context-menu">
+                <button id="copy-field" class="tree-preview-btn">Copy value</button>
+                <button id="paste-field" class="tree-preview-btn">Paste value</button>
+                <button id="spawn-here" class="tree-preview-btn">Spawn here</button>
+                <button id="spawn-on-crate" class="tree-preview-btn">Spawn on crate</button>
+            </div> -->
         </div>
 
         <!-- Level Selector -->

@@ -1,6 +1,6 @@
 import ObjectField, { clearUpdatedData } from './object_field'
 import { createElm, elm } from "./utils/utils"
-import { bitRead } from '../../utils'
+import { bitRead, isVectorZero } from '../../utils'
 import { TYPES_METADATA } from './utils/metadata'
 
 // Save interesting fields on IGZ load (fields that have 
@@ -33,6 +33,11 @@ class ObjectView {
 
         if (init_dom) {
             elm('#object-name').innerText = object.getDisplayName()
+
+            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity'].includes(object.type)
+            const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
+            elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
+
             this.findAllMemoryFields()
             this.findInterestingFields()
             this.createFieldList()

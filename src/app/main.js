@@ -1,8 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
-const path = require('path');
-const fs = require('fs')
 const ProgressBar = require('electron-progressbar')
+const Store = require('electron-store')
 
+const store = new Store()
 let win, progressBar
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -107,7 +107,7 @@ function createMainWindow() {
             label: 'Settings',
             submenu: [
                 {
-                    label: 'Change game folder path',
+                    label: 'Set game folder path',
                     click: () => win.webContents.send('menu-change-game-folder')
                 },
                 {
@@ -124,8 +124,11 @@ function createMainWindow() {
                 {
                     label: 'View data as big endian',
                     type: 'checkbox',
-                    checked: true,
-                    click: (e) => win.webContents.send('menu-toggle-endian', e.checked)
+                    checked: store.get('menu-toggle-endian', true),
+                    click: (e) => {
+                        store.set('menu-toggle-endian', e.checked)
+                        win.webContents.send('menu-toggle-endian', e.checked)
+                    }
                 },
                 {
                     type: 'separator'
@@ -137,8 +140,58 @@ function createMainWindow() {
             ]
         },
         {
-            role: 'windowMenu'
-        }, 
+            label: 'Level Explorer',
+            submenu: [
+                {
+                    label: 'Open Level Explorer',
+                    accelerator: 'CmdOrCtrl+E',
+                    click: () => win.webContents.send('menu-open-explorer'),
+                },
+                {
+                    label: 'Set model extractor path',
+                    click: () => win.webContents.send('menu-set-model-extractor-path')
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: 'Load Models',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-load-models', true),
+                    click: (e) => {
+                        store.set('menu-toggle-load-models', e.checked)
+                        win.webContents.send('menu-toggle-load-models', e.checked)
+                    }
+                },
+                {
+                    label: 'Show splines',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-show-splines', true),
+                    click: (e) => {
+                        store.set('menu-toggle-show-splines', e.checked)
+                        win.webContents.send('menu-toggle-show-splines', e.checked)
+                    }
+                },
+                {
+                    label: 'Show entity links',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-show-entity-links', false),
+                    click: (e) => {
+                        store.set('menu-toggle-show-entity-links', e.checked)
+                        win.webContents.send('menu-toggle-show-entity-links', e.checked)
+                    }
+                },
+                {
+                    label: 'Show all objects',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-show-all-objects', false),
+                    click: (e) => {
+                        store.set('menu-toggle-show-all-objects', e.checked)
+                        win.webContents.send('menu-toggle-show-all-objects', e.checked)
+                    }
+                }
+            ]
+        },
         {
             label: 'About',
             submenu: [
@@ -260,16 +313,15 @@ function showSaveFileDialog(event, extension = 'pak') {
 }
 
 /**
- * Updates the current progress bar window when saving a .pak file
+ * Updates the current progress bar window
  * Creates a new progress bar if it doesn't exist.
  * 
- * @param {String} file_path Path to the file being saved 
- * @param {*} current_file Number of files written so far
- * @param {*} file_count Total files to write
+ * @param {*} current_file Number of files processed so far
+ * @param {*} file_count Total files to processed
  */
-function setProgressBar(event, file_path, current_file, file_count, message) {   
+function setProgressBar(event, current_file, file_count, title, detail, text = "files written") {   
     // reset progress bar
-    if (file_path == null) {
+    if (current_file == null) {
         if (progressBar != null) {
             progressBar.setCompleted()
             progressBar = null
@@ -281,13 +333,13 @@ function setProgressBar(event, file_path, current_file, file_count, message) {
     // create progress bar
     if (progressBar == null) {
         progressBar = new ProgressBar({
-            title: 'Saving to ' + file_path + '...',
-            detail: message,
+            title,
+            detail,
             maxValue: 1,
             indeterminate: false,
             browserWindow: {
                 parent: win,
-                // closable: true,
+                closable: current_file == null,
             }
         })
         // progressBar.on('aborted', function() {});
@@ -295,7 +347,8 @@ function setProgressBar(event, file_path, current_file, file_count, message) {
 
     const progress = (current_file + 1) / file_count
     progressBar.value = progress
-    progressBar.text = `${current_file} / ${file_count} files written. (${(progress * 100).toFixed(2)}%)`
+    progressBar.text = `${current_file} / ${file_count} ${text}. (${(progress * 100).toFixed(2)}%)`
+    progressBar.detail = detail
 
     if (progress == 1) {
         progressBar.setCompleted()

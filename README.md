@@ -9,11 +9,20 @@ This is an early demo, bugs may appear. Feedback and contributions are welcome!
 You can download it for Windows on [the release page](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases).
 For other OS, see below for build instructions.
 
-### PAK explorer
+![demo](./assets/images/demo3.jpg)
+
+## Table of Contents
+[PAK Editor](#pak)  
+[IGZ Editor](#igz)  
+[Level Explorer](#explorer)  
+[Run the project](#run)  
+
+<a name="pak"></a>
+## PAK Editor
 
 *Allows you to explore .pak archives*
 
-![demo1](./assets/images/demo1.png)
+![demo](./assets/images/demo1.jpg)
 
 **Important Note**: No change will be applied until a file is saved.
 Moreover on the very first time saving a new archive, every file will be decompressed and cached (which can take some time). Subsequent saves should be way faster than the first one.
@@ -25,6 +34,8 @@ Moreover on the very first time saving a new archive, every file will be decompr
 - **File -> Revert Level**: Revert the original archive (in the game folder) to its default state. Does not reset the content of the current archive being explored.
 
 - **Import**: Import either a single .igz file or a selection of files from another PAK archive into the current one. If `Update package file` is selected, all dependencies will also be imported recursively, and the _pkg.igz file will be rebuilt.
+
+Note: When importing a .igz file directly (not from an archive), it will be placed under the folder that you currently have selected.
 
 *When clicking on a .igz file within the archive:*
 
@@ -42,11 +53,22 @@ Moreover on the very first time saving a new archive, every file will be decompr
 
 - **Rename**: Rename a file.
 
-### IGZ explorer
+### Other infos
+
+**Change the game folder**: You can change the directory of the game in the Settings menu. It should point to the folder containing `CrashBandicootNSaneTrilogy.exe`
+
+**Change Model Extractor path**: You can change the location of the IgzModelConverter.exe in the Level Explorer menu.
+
+**Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
+
+**Change the endianess**: When viewing objects data in an igz, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
+
+<a name="igz"></a>
+## IGZ Editor
 
 *Allows you to explore .igz files within PAK archives or standalone IGZs*
 
-![demo2](./assets/images/demo2.png)
+![demo](./assets/images/demo2.jpg)
 
 #### Elements
 
@@ -88,15 +110,45 @@ Two additional options become available when right-clicking on Vector3f properti
 
 The can help you visualize the position of objects in a level.
 
-### Other infos
+<a name="explorer"></a>
+## Level Explorer
 
-**Change the game folder**: You can change the directory of the game in the Settings menu. It should point to the folder containing `CrashBandicootNSaneTrilogy.exe`
+![demo](./assets/images/demo4.jpg)
 
-**Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
+When loading a pak archive, you have the possibility to open a work-in-progress 3D scene viewer that will scan through all entities of the level files and try to display them using their corresponding model file.
 
-**Change the endianess**: When viewing objects data in an igz, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
+In order to actually be able to extract models, you will need to download IgzModelConverter.exe ([Github Release page](https://github.com/AdventureT/IgzModelConverter/releases/tag/v1.4)) and place it in the game folder (by default), or anywhere else as you can set its location in the settings.
 
+### Controls
+If you've ever played Minecraft, it works like Creative Mode.
+- W,A,S,D, to move forward/backward and left/right
+- Space, Shift to move up/down
+- Double press on W to go move faster
+- Use the mouse to look around
 
+### Menu Options
+
+- **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. If the `Load models` option is selected, it will first scan for every model in the archive and extract them if they haven't already been extracted. Then, it will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CPhyisicalEntities` (red) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
+
+- **Load Models**: Whether to extract and load model files or not. If not, all models will be replaced with spheres.
+
+- **Show Splines**: Whether to show `igSplineControlPoints` (camera paths, bonus platform paths...)
+
+- **Show entity links**: Whether to show links between `CEntities` and their corresponding spawner.
+
+- **Show all objects**: Some objects related to clouds, shadows, leaves, terrain... are not displayed correctly and are hidden by default. You can select this to show them anyway.
+
+### Focus in Explorer
+
+When clicking an object in the 3D scene, it will open its parent igz file and set the focus to the corresponding igObject in the IGZ Editor.
+
+Moreover when exploring `Entities` in the IGZ editor, a new button `Focus in explorer` will appear that can take you directly to the object in the level explorer.
+
+### 3D Gizmo Editing
+
+When selecting 3D objects, a gizmo will appear that you can use to move objects around. When doing so, it will actually update the values in the parent file and you can save to apply the changes. However, when manually editing the position of an object in the IGZ editor, the changes won't be applied to the level explorer (not implemented yet).
+
+<a name="run"></a>
 ## Run the project
 You can either [download the latest executable](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases), or build the project yourself using `yarn`:
 
@@ -122,11 +174,18 @@ yarn start
 ### Application
 
 - **src/app/main.js**: Electron setup
+
+PAK Editor + main state:
 - **src/app/renderer.js**: Main app implementation (trees & state for pak & igz views)
+- **src/app/import_modal.js**: Import modal for a .pak archive (for "Import" & "Replace" button)
+
+IGZ Editor:
 - **src/app/object_view.js**: Handles the hex view and list of properties for igObject editing.
 - **src/app/field_view.js**: Handle everything related to a property (field)
 - **src/app/utils/metadata.js**: Load and convert igObject types metadata from compressed file
-- **src/app/import_modal.js**: Import modal for a .pak archive (for "Import" & "Replace" button)
+
+Level Explorer:
+- **src/app/level_explorer.js**: Manages the Level Explorer
 
 ## TODO
 - Texture & Audio preview

@@ -49,12 +49,6 @@ const getTempFolder = (...props) => {
     return join(folder, ...props.map(e => e.toString()))
 }
 
-const getModelFolder = (...props) => {
-    const folder = getGameFolder('custom_data', 'models')
-    if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
-    return join(folder, ...props.map(e => e.toString()))
-}
-
 export { 
     elm,
     createElm,
@@ -64,5 +58,4 @@ export {
     getBackupFolder,
     getCacheFolder,
     getTempFolder,
-    getModelFolder
 }

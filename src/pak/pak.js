@@ -326,8 +326,10 @@ class Pak {
         const addFileAndDependencies = (file) => {
             // Add file to the current archive
             pkg_deps.push(file.path)
-            file.updated = true
+            file.data = file.getUncompressedData()
+            file.compression = 0xFFFFFFFF
             file.original = false
+            file.updated = true
             this.files.push(file)
 
             if (!import_dependencies || !file.path.endsWith('.igz')) return

@@ -10,6 +10,10 @@ class BufferView {
         this.offset = offset
     }
 
+    skip(offset) {
+        this.offset += offset
+    }
+
     getValue(method, size, offset) {
         this.offset = offset ?? this.offset
 
@@ -45,6 +49,7 @@ class BufferView {
     readUInt16 = (offset) => this.getValue('getUint16', 2, offset)
     readVector    = (size, offset) => new Array(size).fill(0).map((_, i) => this.readFloat(i == 0 ? offset : null))
     readVectorInt = (size, offset) => new Array(size).fill(0).map((_, i) => this.readInt(i == 0 ? offset : null))
+    readVectorHalf = (size, offset) => new Array(size).fill(0).map((_, i) => uintToFloat16(this.readUInt16(i == 0 ? offset : null)))
     readByte   = (offset) => this.getValue('getUint8', 1, offset)
     readInt8   = (offset) => this.getValue('getInt8', 1, offset)
     readUInt8  = this.readByte
@@ -86,6 +91,21 @@ function bytesToUInt16(bytes, start = 0) {
     if (bytes.length < start + 2) throw new Error('Reading past end of buffer')
     const int = bytes[start] | (bytes[start + 1] << 8)
     return int >>> 0
+}
+
+// https://stackoverflow.com/questions/5678432/decompressing-half-precision-floats-in-javascript
+function uintToFloat16 (binary) {
+    let exponent = (binary & 0x7C00) >> 10
+    let fraction = binary & 0x03FF
+    return (binary >> 15 ? -1 : 1) * (
+        exponent ?
+        (
+            exponent === 0x1F ?
+            fraction ? NaN : Infinity :
+            Math.pow(2, exponent - 15) * (1 + fraction / 0x400)
+        ) :
+        6.103515625e-5 * (fraction / 0x400)
+    )
 }
 
 function intToBytes(int, byteCount = 4) {

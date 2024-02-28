@@ -64,12 +64,17 @@ class ObjectView {
      */
     createHexDataCells() {
         const bytesPerRow = 4 * 6
-        const table = elm('#data-table')
+
+        const tableCtn = elm('#data-table-ctn')
+        const table = createElm('table', 'data-table')
+        table.id = 'data-table'
         table.onmouseleave = () => this.onMouseLeave()
         
         let row = createElm('tr')
         this.hexCells = []
 
+        tableCtn.innerHTML = ''
+        tableCtn.appendChild(table)
         Main.showObjectDataView(true)
 
         // Iterate over every 4 bytes of the object's data
@@ -110,6 +115,12 @@ class ObjectView {
             }
             if (i == this.object.data.length - 4) {
                 table.appendChild(row)
+            }
+            if (i >= 4 * 1000) {
+                const end = createElm('div', '', { textAlign: 'center', margin: '10px' })
+                end.innerText = `+ ${this.object.data.length - i} more bytes...`
+                table.parentNode.appendChild(end)
+                break
             }
         }
 
@@ -162,9 +173,9 @@ class ObjectView {
         const lastField = this.fields.reduce((a, b) => a.offset + a.size > b.offset + b.size ? a : b)
         let lastOffset = lastField.offset + lastField.size
         if (lastOffset % 4 != 0) lastOffset += 4 - (lastOffset % 4)
-        for (let i = lastOffset; i < this.object.size; i += 4) {
-            const cell = this.hexCells[i/4].element
-            const value = this.object.view.readUInt(i)
+        for (let i = lastOffset/4; i < this.hexCells.length; i++) {
+            const cell = this.hexCells[i].element
+            const value = this.object.view.readUInt(i*4)
             if (value != 0 && value != 0xFAFAFAFA) cell.classList.remove('hex-zero')
         }
     }

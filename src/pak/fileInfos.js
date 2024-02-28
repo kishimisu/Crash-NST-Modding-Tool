@@ -44,10 +44,11 @@ class FileInfos {
 
         // Case where we're trying to read updated data from the import modal
         if (this.data == null) {
-            return readFileSync(getTempFolder(this.id))
+            this.data = readFileSync(getTempFolder(this.id))
         }
+
         // Return raw data if not compressed
-        else if (!this.isCompressed()) {
+        if (!this.isCompressed()) {
             return this.data.slice()
         }
         // If it's an original and compressed file
@@ -137,7 +138,7 @@ class FileInfos {
             offset: this.offset,
             ordinal: this.ordinal,
             size: this.size,
-            compression: this.isCompressed() ? this.compression : 'none',
+            compression: this.compression,
             full_path: this.full_path,
             path: this.path,
             original: this.original,

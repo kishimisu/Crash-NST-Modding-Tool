@@ -148,20 +148,7 @@ function createMainWindow() {
                     click: () => win.webContents.send('menu-open-explorer'),
                 },
                 {
-                    label: 'Set model extractor path',
-                    click: () => win.webContents.send('menu-set-model-extractor-path')
-                },
-                {
                     type: 'separator'
-                },
-                {
-                    label: 'Load Models',
-                    type: 'checkbox',
-                    checked: store.get('menu-toggle-load-models', true),
-                    click: (e) => {
-                        store.set('menu-toggle-load-models', e.checked)
-                        win.webContents.send('menu-toggle-load-models', e.checked)
-                    }
                 },
                 {
                     label: 'Show splines',

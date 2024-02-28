@@ -1,22 +1,22 @@
-import { AmbientLight, DirectionalLight, MeshBasicMaterial, MeshPhongMaterial, PerspectiveCamera, Scene, WebGLRenderer, Vector3, Raycaster, Vector2, Euler, BoxGeometry, Mesh, SphereGeometry, DoubleSide, FogExp2 } from 'three'
+import { AmbientLight, DirectionalLight, MeshBasicMaterial, MeshPhongMaterial, PerspectiveCamera, Scene, WebGLRenderer, Vector3, Raycaster, Vector2, Euler, Mesh, SphereGeometry, DoubleSide, FogExp2, BufferGeometry, Float32BufferAttribute, Group, Color } from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { elm, getArchiveFolder, getGameFolder, getModelFolder } from './utils/utils'
-import { existsSync, readFileSync, rmSync } from 'fs'
+import { elm, getArchiveFolder } from './utils/utils'
 import IGZ from '../../igz/igz'
 import ObjectView from './object_view'
 import igObject from '../../igz/igObject'
-import { execSync } from 'child_process';
 import { ipcRenderer } from 'electron'
+import { extractModelData } from './utils/model_extract';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 class LevelExplorer {
-    static initialized = false
-
     constructor() {
         this.visible = false
+        this.initialized = false
+        this.mode = 'level' // level, model
 
         elm('#focus-in-explorer').addEventListener('click', () => {
             const object = Main.objectView.object
@@ -41,11 +41,6 @@ class LevelExplorer {
         this.visible = visible
     }
 
-    toggleLoadModels(checked) {
-        localStorage.setItem('explorer-load-models', checked)
-        if (this.initialized) this.init()
-    }
-
     toggleShowSplines(checked) {
         localStorage.setItem('explorer-show-splines', checked)
         if (this.initialized) this.init()
@@ -62,33 +57,98 @@ class LevelExplorer {
     }
 
     deselectObject() {
+        if (this.mode == 'model') return
         this.transformControls?.detach()
         this.renderer?.render(this.scene, this.cam)
     }
 
+    showModel(igz) {
+        const model = extractModelData(igz)
+        if (model == null) return console.warn('No model data found in', igz.path)
+
+        if (!this.renderer) this.initRenderer()
+        this.mode = 'model'
+
+        const scene = new Scene()
+        const cam = new PerspectiveCamera(75, this.canvas.width / this.canvas.height, 1, 10000)
+
+        const ambientLight = new AmbientLight(0x525255)
+        scene.add(ambientLight)
+
+        const d1 = new DirectionalLight(0xffffff, 1)
+        d1.position.set(.1, 1.1, .34)
+        scene.add(d1)
+
+        const d2 = new DirectionalLight(0xfaf8ff, 0.5)
+        d2.position.set(-.15, -.9, -.4)
+        scene.add(d2)
+
+        if (this.model_controls) this.model_controls.dispose()
+        this.model_controls = new OrbitControls(cam, this.renderer.domElement)
+        this.model_controls.addEventListener('change', () => this.renderer.render(scene, cam))
+
+        const { drawCalls } = model
+        let boundsMin = [Infinity, Infinity, Infinity]
+        let boundsMax = [-Infinity, -Infinity, -Infinity]
+
+        const group = new Group()
+        for (let j = 0; j < drawCalls.length; j++) {
+            const drawCall = drawCalls[j]
+            const mesh = this.createMesh(drawCall)
+            boundsMin = drawCall.vertexData.reduce((acc, e) => acc.map((v, i) => Math.min(v, e.position[i])), boundsMin)
+            boundsMax = drawCall.vertexData.reduce((acc, e) => acc.map((v, i) => Math.max(v, e.position[i])), boundsMax)
+            group.add(mesh)
+        }
+        scene.add(group)
+
+        const center = [(boundsMin[0] + boundsMax[0]) / 2, (boundsMin[1] + boundsMax[1]) / 2, (boundsMin[2] + boundsMax[2]) / 2]
+        this.model_controls.target.set(center[0], center[1], center[2])
+        cam.position.set(center[0] - Math.max(boundsMax[0] - boundsMin[0], boundsMax[2] - boundsMin[2]), center[1] + 60, center[2])
+
+        this.model_scene = scene
+        this.model_cam = cam
+
+        this.toggleVisibility(true)
+        requestAnimationFrame(() => {
+            this.model_controls.update()
+            this.renderer.render(scene, cam)
+        })
+    }
+
+    getScene() {
+        return this.model_scene ?? this.scene
+    }
+
+    getCamera() {
+        return this.model_cam ?? this.cam
+    }
+
+    initRenderer() {
+        const canvas = elm('canvas')
+        this.renderer = new WebGLRenderer({ canvas })
+        this.renderer.setPixelRatio(1) // No need for high-res
+        this.renderer.setClearColor(0x2661ab)
+        this.canvas = canvas
+
+        elm('#hide-explorer').addEventListener('click', () => this.toggleVisibility(false))
+
+        const resizeCanvas = () => {
+            const bounds = canvas.getBoundingClientRect()
+            canvas.width = bounds.width
+            canvas.height = bounds.height
+            this.renderer.setViewport(0, 0, bounds.width, bounds.height)
+            this.getCamera().updateProjectionMatrix()
+            this.renderer.render(this.getScene(), this.getCamera())
+        }
+        window.addEventListener('resize', () => resizeCanvas())
+        requestAnimationFrame(() => resizeCanvas())
+    }
+
     init() {
         if (!this.initialized) {
-            const canvas = elm('canvas')
-            this.renderer = new WebGLRenderer({ canvas })
-            this.renderer.setPixelRatio(1) // No need for high-res
-            this.canvas = canvas
-
-            elm('#hide-explorer').addEventListener('click', () => this.toggleVisibility(false))
-
+            if (!this.renderer) this.initRenderer()
             this.scene = new Scene()
-
             this.cam = new PerspectiveCamera(75, canvas.width / canvas.height, 1, 40000)
-
-            const resizeCanvas = () => {
-                const bounds = canvas.getBoundingClientRect()
-                canvas.width = bounds.width
-                canvas.height = bounds.height
-                this.renderer.setViewport(0, 0, bounds.width, bounds.height)
-                this.cam.updateProjectionMatrix()
-                this.renderer.render(this.scene, this.cam)
-            }
-            window.addEventListener('resize', () => resizeCanvas())
-            requestAnimationFrame(() => resizeCanvas())
 
             this.transformControls = new TransformControls(this.cam, this.renderer.domElement)
             this.transformControls.setMode('translate')
@@ -107,8 +167,6 @@ class LevelExplorer {
             })
             
             this.controls = new NoClipControls(this)
-
-            this.renderer.setClearColor(0x2661ab)
             
             this.loader = new FBXLoader()
             this.raycaster = new Raycaster()
@@ -122,7 +180,7 @@ class LevelExplorer {
             canvas.addEventListener('mousedown', () => dragging = false)
             canvas.addEventListener('mousemove', () => dragging = true)
             
-            canvas.addEventListener('mouseup', (event) => {
+            canvas.addEventListener('mouseup', async (event) => {
                 if (dragging) return
                 const boundingRect = canvas.getBoundingClientRect()
                 const x = (event.clientX - boundingRect.left) / boundingRect.width * 2 - 1
@@ -136,17 +194,19 @@ class LevelExplorer {
                     const object =  intersects.map(e => e.object).find(e => e.userData.igz != null)
                                  ?? intersects.map(e => e.object.parent).find(e => e.userData.igz != null)
 
-                    if (lastObject) lastObject.children?.forEach(e => e.material.color.set(lastColor))
+                    lastObject?.children?.forEach(e => e.material.color.set(lastColor))
 
                     if (object != null) {
-                        object.children?.forEach(e => e.material.color.set(0xeda93b))
-
                         lastObject = object
-                        lastColor = object.children?.length > 0 ? object.children[0].material.color : object.material.color
+                        lastColor = object.children?.length > 0 ? object.children[0].material.color.clone() : object.material.color.clone()
+
+                        object.children?.forEach(e => e.material.color.set(0xeda93b))
 
                         const objectData = object.userData
                         
-                        if (!Main.igz || Main.igz.path != objectData.igz) {
+                        if (!Main.igz || Main.treeMode == 'pak' || Main.igz.path != objectData.igz) {
+                            const confirm = !Main.igz?.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Do you want to continue?')
+                            if (!confirm) return
                             const fileIndex = Main.pak.files.findIndex(e => e.path == objectData.igz)
                             const fileInfos = Main.pak.files[fileIndex]
                             Main.setIGZ(IGZ.fromFileInfos(fileInfos))
@@ -174,8 +234,6 @@ class LevelExplorer {
                 }
             })
 
-            this.defaultMaterial = new MeshPhongMaterial({ color: 0xffffff, shininess: 0, side: DoubleSide })
-
             const fog = new FogExp2(0x2661ab, 0.00006)
             this.scene.fog = fog
 
@@ -187,102 +245,84 @@ class LevelExplorer {
         this.scene.clear()
         this.toggleVisibility(true)
 
+        if (this.mode == 'model') {
+            this.mode = 'level'
+            this.model_scene = null
+            this.model_cam = null
+            this.model_controls.dispose()
+            this.model_controls = null
+        }
 
         // Add ambient light
         const ambientLight = new AmbientLight(0x525255)
         this.scene.add(ambientLight)
 
         // Add directional light
-        const directionalLight = new DirectionalLight(0xffffff, 1)
-        directionalLight.position.set(50, 50, -100)
-        this.scene.add(directionalLight)
+        const d1 = new DirectionalLight(0xf0f0ff, 1.1)
+        d1.position.set(.1, 1, -.4)
+        this.scene.add(d1)
+
+        const d2 = new DirectionalLight(0xfaf8ff, 0.2)
+        d2.position.set(-.2, -.9, .3)
+        this.scene.add(d2)
 
         this.scene.add(this.transformControls)
 
         this.cam.position.set(-40, 600, -1000)
         this.cam.rotation.set(0, Math.PI, 0)
 
-        const actorFiles = []
         const modelFiles = []
         const mapFiles   = []
 
         for (const file of Main.pak.files) {
             if (!file.path.endsWith('.igz')) continue
 
-            if (file.path.startsWith('actors/')) 
-                actorFiles.push(file)
-            else if (file.path.startsWith('models/') && !file.path.includes('Designer_Level'))
+            if (file.path.startsWith('actors/') || file.path.startsWith('models/') && !file.path.includes('Designer_Level_Template'))
                 modelFiles.push(file)
             else if (file.path.startsWith('maps/') && !file.path.includes('Audio') && !file.path.includes('Music') && !file.path.includes('StaticCollision'))
                 mapFiles.push(file)
         }
 
-        const exePath = localStorage.getItem("model-extractor-path") ?? getGameFolder("IgzModelConverterGUI.v1.4.exe")
-        const show_models = (localStorage.getItem('explorer-load-models') ?? 'true') === 'true'
-        const has_converter = existsSync(exePath)
+        const models = {}
+        const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
+        const hidden_objects = ['cloud', 'shadow', 'palmcluster']
         
-        if (show_models && !has_converter) ipcRenderer.send('show-warning-message', 'IgzModelConverterGUI.exe not found. You can set it in Level Explorer->Set model extractor path. See the readme for a download link.\nYou can also disable the option to load models to avoid this warning.')
-        this.hasModels = show_models && has_converter
+        // Create model meshes
+        for (let i = 0; i < modelFiles.length; i++) {
+            const file = modelFiles[i]
+            const name = file.path.split('/').pop()
 
-        let models = []
+            const title = 'Constructing models'
+            ipcRenderer.send('set-progress-bar', i, modelFiles.length, title, `Reading file ${name}`, 'models loaded')
 
-        if (this.hasModels) {
-            const allModelFiles = modelFiles.concat(actorFiles)
+            const igz = IGZ.fromFileInfos(file)
+            const modelData = extractModelData(igz)
+            if (modelData == null) continue
+            const {drawCalls, transforms} = modelData
+            if (transforms != null && !show_all_objects) continue
 
-            // Extract models
-            for (let i = 0; i < allModelFiles.length; i++) {
-                const file = allModelFiles[i]
-                const isActor = file.path.startsWith('actors/')
-                const name = file.path.split('/').pop()
-                const fbxPath = getModelFolder(name.replace('.igz', '.fbx'))
-
-                if (existsSync(fbxPath)) continue
-
-                const title = 'Extracting models'
-                ipcRenderer.send('set-progress-bar', i, allModelFiles.length, title, `Extracting ${name}`, 'models extracted')
-
-                const extractPath = getModelFolder(name)
-                const igz = IGZ.fromFileInfos(file)
-                igz.save(extractPath)
-
-                const convertCmd = `"${exePath}" "${extractPath}" nst ${isActor ? 'act' : 'mod'}`
-                try {
-                    execSync(convertCmd)
-                    console.log('Extracted', file.path, extractPath)
-                }
-                catch (e) {
-                    console.warn(`Could not convert model ${name}`, e)
-                }
-                rmSync(extractPath)
+            const group = new Group()
+            for (let j = 0; j < drawCalls.length; j++) {
+                const drawCall = drawCalls[j]
+                const mesh = this.createMesh(drawCall)
+                group.add(mesh)
             }
-
-            ipcRenderer.send('set-progress-bar', null)
-
-            // Load models
-            models = Object.fromEntries(allModelFiles
-                        .map(e => {
-                                const name = e.path.split('/').pop().replace('.igz', '')
-                                try {
-                                    const fbx  = getModelFolder(name + '.fbx')
-                                    return [name, {id: e.id, model: readFileSync(fbx)}]
-                                }
-                                catch {
-                                    console.log(`Could not load model ${name}.fbx`)
-                                    return null
-                                }
-                            })
-                        .filter(e => e != null))
+            models[name.replace('.igz', '')] = group
         }
 
-        const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
+        ipcRenderer.send('set-progress-bar', null)
 
+        const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
+        // const hidden_objects = ['levelendscene', 'cloud', 'shadow', , 'leaves', 'introisland', 'palmcluster', 'terrain', 'proxy']
+        const hidden_objects = []
+        
         const processObjects = (igz, type, callback) => {
             const objects = igz.objects.filter(e => e.type == type && e.references.length <= 1)
             const validObjects = []
 
             for (const object of objects) {
                 const lowername = object.name.toLowerCase()
-                if (!show_all_objects && ['levelendscene', 'cloud', 'shadow', , 'leaves', 'introisland', 'palmcluster', 'terrain', 'proxy'].some(e => lowername.includes(e))) continue
+                if (!show_all_objects && hidden_objects.some(e => lowername.includes(e))) continue
                 const result = callback(igz, object)
                 if (result) validObjects.push(result)
             }
@@ -296,7 +336,7 @@ class LevelExplorer {
             CPhysicalEntities: []
         }
 
-        const processNextFile = (index) => {
+        const processNextFile = (index = 0) => {
             this.renderer.render(this.scene, this.cam)
 
             const file = mapFiles[index]
@@ -321,6 +361,8 @@ class LevelExplorer {
 
                 if (entity.name.includes('Collectible_Wumpa'))
                     entity.model_name = "crash_wumpafruit_no_sparkles"
+                else if (entity.name.includes('Collectible_ExtraLife'))
+                    entity.model_name = "Collectible_Crash_ExtraLife"
 
                 if (entity.model_name == null) {
                     this.loadModel(null, entity)
@@ -328,24 +370,23 @@ class LevelExplorer {
                 }
 
                 const model_name = entity.model_name.split('\\').pop().replace('.igb', '')
-                let fbx = models[model_name]
+                const model = models[model_name]
 
-                if (fbx == null && this.hasModels) 
-                    console.warn(`Could not find model ${model_name}`)
+                if (model == null) console.warn(`Could not find model ${model_name}`)
 
-                this.loadModel(fbx, entity)
+                this.loadModel(model?.clone(), entity)
             }
 
             if (index < mapFiles.length - 1) 
-                // requestAnimationFrame(() => processNextFile(index + 1))
                 processNextFile(index + 1)
             else {
                 ipcRenderer.send('set-progress-bar', null)
                 this.renderer.render(this.scene, this.cam)
+                console.log('Loaded', loaded)
             }
         }
 
-        processNextFile(0)
+        processNextFile()
     }
 
     process_igEntity(igz, object) 
@@ -430,26 +471,42 @@ class LevelExplorer {
         return object.toMeshInfo(igz, { model_name, transform, color })
     }
 
-    loadModel(modelData, entity) {
+    createMesh(drawCall) {
+        const geometry = new BufferGeometry()
+        const material = new MeshPhongMaterial({ color: 0xffffff, shininess: 150, side: DoubleSide, wireframe: false })
+    
+        const vertices = drawCall.vertexData.map(e => e.position).flat()
+        const normals  = drawCall.vertexData.map(e => e.normal).flat()
+        const indices  = drawCall.indexData
+    
+        geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3))
+        geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3))
+        geometry.setIndex(indices)
+    
+        const mesh = new Mesh(geometry, material)
+        return mesh
+    }
+
+    loadModel(model, entity) {
         let { name, position, rotation, scale, color, parentPosition, controlPoints, type, model_name } = entity
 
-        let model = modelData ? this.loader.parse(modelData.model.buffer) : new SphereGeometry(20, 20, 20)
+        if (model == null) {
+            const geo = new SphereGeometry(20, 20, 20)
+            const mat = new MeshBasicMaterial()
+            model = new Mesh(geo, mat)
+        }
+        model.userData = { ...entity }
 
         // Apply color
-        const isCrate = name.includes('Crate_')
-        if (isCrate) {
-            if (!this.hasModels) model = new BoxGeometry(80, 80, 80)
+        if (name.includes('Crate_')) {
             color = 0xfaba52
         }
         if (name.includes('Collectible_Wumpa')) {
             color = 0xffdd12
         }
-        if (modelData == null && model_name == null && type == 'igEntity') {
+        if (model == null && model_name == null && type == 'igEntity') {
             color = 0xf9fc9a
         }
-
-        const fbx = modelData ? model : new Mesh(model, isCrate ? new MeshPhongMaterial({ color, shininess: 0 }) : new MeshBasicMaterial({ color }))
-        fbx.userData = { ...entity }
 
         // Create splines (camera...)
         if (controlPoints) {
@@ -457,7 +514,10 @@ class LevelExplorer {
             this.createLine(controlPoints, 0xff0000, 0.001, true)
         }
 
-        if (position[0] == 0 && position[1] == 0 && position[2] == 0) return
+        if (position[0] == 0 && position[1] == 0 && position[2] == 0) {
+            if (name.endsWith('_gen')) return
+            console.log('No position for', name)
+        }
 
         // Link CEntity to spawners
         const show_entity_links = (localStorage.getItem('explorer-show-entity-links') ?? 'false') === 'true'
@@ -466,31 +526,30 @@ class LevelExplorer {
         }
 
         // Apply material
-        if (modelData)
-            fbx.traverse((child) => {
-                if (child.isMesh) {
-                    child.material = this.defaultMaterial.clone()
-                    child.material.color.set(color ?? 0xffffff)
-                }
-            })
+        model.traverse((child) => {
+            if (child.isMesh) {
+                child.material = child.material.clone()
+                child.material.color.set(color ?? 0xffffff)
+            }
+        })
 
         // Set position
-        fbx.position.set(...position)
+        model.position.set(...position)
 
         // Set rotation
         if (rotation) {
-            fbx.rotateY(rotation[1])
-            fbx.rotateZ(rotation[2])
-            fbx.rotateX(rotation[0])
+            model.rotateY(rotation[1])
+            model.rotateZ(rotation[2])
+            model.rotateX(rotation[0])
         }
-        fbx.rotateY(-Math.PI/2)
+        //model.rotateY(-Math.PI/2)
 
         // Set scale
         if (scale)
-            fbx.scale.set(...scale)
+            model.scale.set(...scale)
 
         // Add object to scene
-        this.scene.add(fbx)
+        this.scene.add(model)
     }
 
     createLine(points, color, width, addMarkers = true) {
@@ -518,6 +577,7 @@ class LevelExplorer {
 
     render() {
         requestAnimationFrame(() => this.render())
+        if (this.mode == 'model') return
         
         if (this.controls.update())
             this.renderer.render(this.scene, this.cam)
@@ -604,7 +664,7 @@ class NoClipControls {
             this.explorer.raycaster.setFromCamera(mouse, this.explorer.cam)
             const intersects = this.explorer.raycaster.intersectObjects(this.explorer.scene.children)
             
-            if (intersects.length > 0 && intersects.some(e => e.object.parent?.parent?.type == "TransformControlsGizmo")) {
+            if (this.explorer.transformControls.object != null && intersects.length > 0 && intersects.some(e => e.object.parent?.parent?.type == "TransformControlsGizmo")) {
                 this.clicked = false
                 this.transform = true
             }
@@ -677,6 +737,16 @@ igObject.prototype.tryGetChildRecursive = function(...types) {
         if (object == null) return null
     }
     return object
+}
+
+igObject.prototype.tryGetChildren = function(type) {
+    return this.children.filter(e => e.object.type == type).map(e => e.object)
+}
+
+igObject.prototype.getChildren = function(type) {
+    const children = this.children.filter(e => e.object.type == type).map(e => e.object)
+    if (children.length == 0) throw new Error(`Could not find ${type} in object ${this.getName()}`)
+    return children
 }
 
 igObject.prototype.getTransform = function() {

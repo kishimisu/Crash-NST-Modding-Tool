@@ -557,15 +557,21 @@ class IGZ {
             root = [{text: 'No Objects'}]
         }
 
-        return [{
+        const tree = [{
             text: '[Fixups]',
             children: Object.values(this.fixups).map(e => e.toNodeTree(this.objects)),
         },
-            ...root,
-        {
-            text: `Unreferenced Objects (${unreferenced.length})`,
-            children: unreferenced.map(e => e.toNodeTree())
-        }]
+            ...root
+        ]
+
+        if (unreferenced.length > 0) {
+            tree.push({
+                text: `Unreferenced Objects (${unreferenced.length})`,
+                children: unreferenced.map(e => e.toNodeTree())
+            })
+        }
+
+        return tree
     }
 
     toString() {

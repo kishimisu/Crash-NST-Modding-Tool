@@ -57,11 +57,11 @@ Note: When importing a .igz file directly (not from an archive), it will be plac
 
 **Change the game folder**: You can change the directory of the game in the Settings menu. It should point to the folder containing `CrashBandicootNSaneTrilogy.exe`
 
-**Change Model Extractor path**: You can change the location of the IgzModelConverter.exe in the Level Explorer menu.
-
 **Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
 
 **Change the endianess**: When viewing objects data in an igz, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
+
+**3D Model Viewer**: When selecting actors or model files in a .pak archive, a 3D preview of the model will also be displayed.
 
 <a name="igz"></a>
 ## IGZ Editor
@@ -116,8 +116,6 @@ The can help you visualize the position of objects in a level.
 ![demo](./assets/images/demo4.jpg)
 
 When loading a pak archive, you have the possibility to open a work-in-progress 3D scene viewer that will scan through all entities of the level files and try to display them using their corresponding model file.
-
-In order to actually be able to extract models, you will need to download IgzModelConverter.exe ([Github Release page](https://github.com/AdventureT/IgzModelConverter/releases/tag/v1.4)) and place it in the game folder (by default), or anywhere else as you can set its location in the settings.
 
 ### Controls
 If you've ever played Minecraft, it works like Creative Mode.

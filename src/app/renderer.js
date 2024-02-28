@@ -12,7 +12,6 @@ import FileInfos from '../pak/fileInfos.js'
 import ObjectView from './components/object_view.js'
 import LevelExplorer from './components/level_explorer.js'
 import { clearUpdatedData } from './components/object_field.js'
-import PakModifiers from './components/utils/modifier.js'
 import { init_file_import_modal } from './components/import_modal.js'
 import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
 
@@ -201,7 +200,7 @@ class Main {
         this.igz = igz
         
         treePreview.load(igz.toNodeTree(false))
-        treePreview.get(2).expand()
+        treePreview.get(2)?.expand()
     }
 
     // Hide IGZ content preview
@@ -216,7 +215,7 @@ class Main {
         if (Main.pak == null) return ipcRenderer.send('show-warning-message', 'This feature is only available in .pak files.')
         
         try {
-            if (pak == this.levelExplorer.pak) 
+            if (pak == this.levelExplorer.pak && this.levelExplorer.mode == 'level')
                 return this.levelExplorer.toggleVisibility(true)
             this.levelExplorer.init()
         } catch (e) {
@@ -255,7 +254,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.11 - '
+        const title = 'The Apprentice v1.12 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -306,6 +305,9 @@ class Main {
  */
 function onNodeClick(event, node) 
 {
+    if (Main.levelExplorer.mode == 'model')
+        Main.levelExplorer.toggleVisibility(false)
+
     // Clicked a file in PAK
     if (Main.treeMode === 'pak') {
         if (node.type === 'folder') {
@@ -323,10 +325,16 @@ function onNodeClick(event, node)
             else 
                 Main.hideIGZPreview()
 
+            const file = pak.files[node.fileIndex]
             Main.showFileButtons(true)
-            Main.setSyntaxHighlightedCode(pak.files[node.fileIndex])
+            Main.setSyntaxHighlightedCode(file)
 
-            elm('#include-in-pkg').checked = pak.files[node.fileIndex].include_in_pkg
+            if ((file.path.startsWith('actors/') || file.path.startsWith('models/')) && file.path.endsWith('.igz')) {
+                const igz = IGZ.fromFileInfos(file)
+                Main.levelExplorer.showModel(igz)
+            }
+
+            elm('#include-in-pkg').checked = file.include_in_pkg
         }
     }
     // Clicked a file in IGZ
@@ -593,7 +601,8 @@ async function importToPAK() {
             path, full_path: root + path,
             data, size: data.length,
             updated: true,
-            original: false
+            original: false,
+            compression: 0xFFFFFFFF
         })
 
         pak.files.push(file)
@@ -612,7 +621,6 @@ async function importToPAK() {
         const import_pak = Pak.fromFile(file_path)
 
         const title = 'Importing from ' + file_path
-        const message = 'Importing files to PAK...'
         const progress_callback = (path, current, total) => ipcRenderer.send('set-progress-bar', current, total, title, 'Importing ' + path, 'files imported')
 
         try {
@@ -682,7 +690,7 @@ function launchGame(pak) {
         copyFileSync(pak.path, originalPath)
     }
 
-    const cmd = `"${exePath}" -om ${level}/${level.split('/')[1]}`
+    const cmd = `"${exePath}" -om ${level}/${level.split('/').pop()}`
     exec(cmd)
 }
 
@@ -901,7 +909,7 @@ async function main()
         const fileIndex = tree.lastSelectedNode().fileIndex
 
         for (const file of pak.files.filter(e => !e.original)) {
-            writeFileSync(getTempFolder(file.id), new Uint8Array(file.data))
+            writeFileSync(getTempFolder(file.id), file.data)
         }
         const [newFileIndex] = await ipcRenderer.invoke('create-import-modal', {
             file_path: pak.path,
@@ -921,6 +929,9 @@ async function main()
             Main.setNodeToUpdated(node)
             node.select()
 
+            if (Main.levelExplorer.mode == 'model' && Main.levelExplorer.visible) 
+                Main.levelExplorer.showModel(IGZ.fromFileInfos(pak.files[fileIndex]))
+
             console.log('Replaced', pak.files[fileIndex], pak.files[newFileIndex])
         }
     })
@@ -935,6 +946,7 @@ async function main()
             Main.reloadTree(pak.toNodeTree())
             Main.hideIGZPreview()
             Main.hideStructView()
+            if (Main.levelExplorer.mode == 'model') Main.levelExplorer.toggleVisibility(false)
         }
     })
 
@@ -998,7 +1010,6 @@ ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
 
 ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
 ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())
-ipcRenderer.on('menu-toggle-load-models', (_, checked) => Main.levelExplorer.toggleLoadModels(checked))
 ipcRenderer.on('menu-toggle-show-splines', (_, checked) => Main.levelExplorer.toggleShowSplines(checked))
 ipcRenderer.on('menu-toggle-show-entity-links', (_, checked) => Main.levelExplorer.toggleShowEntityLinks(checked))
 ipcRenderer.on('menu-toggle-show-all-objects', (_, checked) => Main.levelExplorer.toggleShowAllObjects(checked))

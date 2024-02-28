@@ -15,7 +15,7 @@ For other OS, see below for build instructions.
 [PAK Editor](#pak)  
 [IGZ Editor](#igz)  
 [Level Explorer](#explorer)  
-[Run the project](#run)  
+[Build the project](#run)  
 
 <a name="pak"></a>
 ## PAK Editor
@@ -72,11 +72,12 @@ Note: When importing a .igz file directly (not from an archive), it will be plac
 
 #### Elements
 
-- **Objects**: List of root objects referenced in the file, with children dependencies.
+- **Fixups**: Fixups are lists of names (`TSTR`), types (`TMET`), handles and external dependencies (`EXNM`, `EXID`, `TDEP`). R-fixups contains offsets to objects and properties inside the igz file. For each offset, the referenced object's name is displayed along with the relative offset inside the object. You can click on them to display the object's view.
 
-- **Unreferenced objects**: Contains objects that are not referenced by any other. Usually, it will have two entries that should not be updated (igObjectList & igNameList).
+- **Objects**: List of root objects referenced in the file, grouped by type.
 
-- **Fixups**: Fixups containing list of offsets are directly translated to the object they're pointing to in their child view. Other fixups contains their original data (strings or int list)
+- **Unreferenced objects**: Contains objects that are not referenced by any other. Usually, it will have two entries (igObjectList & igNameList).
+
 
 ### Data editing
 
@@ -126,15 +127,17 @@ If you've ever played Minecraft, it works like Creative Mode.
 
 ### Menu Options
 
-- **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. If the `Load models` option is selected, it will first scan for every model in the archive and extract them if they haven't already been extracted. Then, it will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CPhyisicalEntities` (red) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
-
-- **Load Models**: Whether to extract and load model files or not. If not, all models will be replaced with spheres.
+- **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. This will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CPhyisicalEntities` (red) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
 
 - **Show Splines**: Whether to show `igSplineControlPoints` (camera paths, bonus platform paths...)
 
 - **Show entity links**: Whether to show links between `CEntities` and their corresponding spawner.
 
+- **Show grass**: Some levels contain grass, and grass models can take quite some time to extract compared to other models. It's disabled by default for quick load times.
+
 - **Show all objects**: Some objects related to clouds, shadows, leaves, terrain... are not displayed correctly and are hidden by default. You can select this to show them anyway.
+
+- **Render at full resolution**: This option only has effect for retina/2K/4K displays. By default the scene is rendered at a maximum resolution of 1080p for performance. You can choose to display it at native resolution by checking this option.
 
 ### Focus in Explorer
 
@@ -147,7 +150,7 @@ Moreover when exploring `Entities` in the IGZ editor, a new button `Focus in exp
 When selecting 3D objects, a gizmo will appear that you can use to move objects around. When doing so, it will actually update the values in the parent file and you can save to apply the changes. However, when manually editing the position of an object in the IGZ editor, the changes won't be applied to the level explorer (not implemented yet).
 
 <a name="run"></a>
-## Run the project
+## Build the project
 You can either [download the latest executable](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases), or build the project yourself using `yarn`:
 
 ### Generate platform-specific distributable

@@ -1,4 +1,6 @@
-const convertPosition = ([x, y, z]) => ([-x, z, y])
+import igObject from "../../../igz/igObject"
+
+const convertPosition = ([x, y, z], [tx = 0, ty = 0, tz = 0] = []) => ([-x-tx, z+tz, y+ty])
 
 function extractModelData(igz) {
     const igModelDrawCallData = igz.objects.filter(e => e.type === 'igModelDrawCallData')
@@ -6,14 +8,28 @@ function extractModelData(igz) {
     if (igModelDrawCallData == null || igModelDrawCallData.length == 0) 
         return console.warn('No draw call data for ' + igz.path)
 
-    const animatedTransform = igModelDrawCallData[0].references.find(e => e.type === 'igAnimatedTransform')
-    const transforms = animatedTransform ? igz.objects.filter(e => e.type == 'igAnimatedTransform').map(e => convertPosition(e.view.readVector(3, 0x50))) : null
-    // if (animatedTransform != null) console.warn('Animated model: ' + igz.path)
+    const igModelData = igz.objects.find(e => e.type === 'igModelData')
+    const transforms = igModelData.extractMemoryData(igz, 0x40 + 8, 8).map(e => {
+        const object = igz.findObject(e)
+        if (object == null) return [0, 0, 0]
+        return object.view.readVector(3, 0x50)
+    })
+    const transformHierarchy = igModelData.extractMemoryData(igz, 0x58 + 8)
+    const transformIndices = igModelData.extractMemoryData(igz, 0x88 + 8)
 
-    function processDrawCall(drawCall) {
+    const getAnimatedTransform = (drawCallIndex) => {
+        let transformIndex = transformIndices[drawCallIndex] - 1
+
+        if (transformHierarchy[transformIndex] > 0) 
+            transformIndex = transformHierarchy[transformIndex] - 1
+
+        return transforms[transformIndex]
+    }
+
+    function processDrawCall(drawCall, index) {
         const igGraphicsVertexBuffer = drawCall.getChild('igGraphicsVertexBuffer')
         const igVertexBuffer = igGraphicsVertexBuffer.getChild('igVertexBuffer')
-        const vertexData = extractVertexData(igVertexBuffer, null)
+        const vertexData = extractVertexData(igVertexBuffer, null, index)
     
         const igGraphicsIndexBuffer  = drawCall.getChild('igGraphicsIndexBuffer')
         const igIndexBuffer = igGraphicsIndexBuffer.getChild('igIndexBuffer')
@@ -22,7 +38,7 @@ function extractModelData(igz) {
         return { vertexData, indexData }
     }
     
-    function extractVertexData(igBuffer, elementSize) {
+    function extractVertexData(igBuffer, elementSize, drawCallIndex) {
         if (elementSize == null) {
             const igVertexFormat = igBuffer.getChild('igVertexFormat')
             elementSize = igVertexFormat.view.readUInt(0x10)
@@ -43,14 +59,16 @@ function extractModelData(igz) {
             else if (elementSize == 24) {
                 const position = dataObject.view.readVector(3)
                 const uv = dataObject.view.readVectorHalf(2)
-                data.push({ position: convertPosition(position), normal: [0, 0, 0], uv })
+                const transform = getAnimatedTransform(drawCallIndex)
+                data.push({ position: convertPosition(position, transform), normal: [0, 0, 0], uv })
             }
             else {
                 const position = dataObject.view.readVector(3)
                 const normal   = dataObject.view.readVector(3)
                 if (hasPadding)  dataObject.view.skip(4)
                 const uv = dataObject.view.readVectorHalf(2)
-                data.push({ position: convertPosition(position), normal: convertPosition(normal), uv })
+                const transform = getAnimatedTransform(drawCallIndex)
+                data.push({ position: convertPosition(position, transform), normal: convertPosition(normal), uv })
             }
         }
     
@@ -58,7 +76,22 @@ function extractModelData(igz) {
     }
 
     const drawCalls = igModelDrawCallData.map(processDrawCall)
-    return {drawCalls, transforms}
+    return { drawCalls }
+}
+
+igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
+    const memSize = this.view.readUInt(offset)
+    const dataOffset = this.view.readUInt(offset + 8)
+    const elementCount = memSize / elementSize
+    const object = igz.findObject(dataOffset)
+    const startOffset = igz.getGlobalOffset(dataOffset) - object.global_offset
+    
+    const data = []
+    for (let i = 0; i < elementCount; i++) {
+        data.push(object.view.readUInt(startOffset + i * elementSize))
+    }
+
+    return data
 }
 
 export { 

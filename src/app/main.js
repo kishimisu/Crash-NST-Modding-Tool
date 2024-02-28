@@ -169,12 +169,30 @@ function createMainWindow() {
                     }
                 },
                 {
-                    label: 'Show all objects',
+                    label: 'Show grass',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-show-grass', false),
+                    click: (e) => {
+                        store.set('menu-toggle-show-grass', e.checked)
+                        win.webContents.send('menu-toggle-show-grass', e.checked)
+                    }
+                },
+                {
+                    label: 'Show hidden objects',
                     type: 'checkbox',
                     checked: store.get('menu-toggle-show-all-objects', false),
                     click: (e) => {
                         store.set('menu-toggle-show-all-objects', e.checked)
                         win.webContents.send('menu-toggle-show-all-objects', e.checked)
+                    }
+                },
+                {
+                    label: 'Render at full resolution',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-full-resolution', false),
+                    click: (e) => {
+                        store.set('menu-toggle-full-resolution', e.checked)
+                        win.webContents.send('menu-toggle-full-resolution', e.checked)
                     }
                 }
             ]

@@ -254,7 +254,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.12 - '
+        const title = 'The Apprentice v1.13 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -1012,6 +1012,8 @@ ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
 ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())
 ipcRenderer.on('menu-toggle-show-splines', (_, checked) => Main.levelExplorer.toggleShowSplines(checked))
 ipcRenderer.on('menu-toggle-show-entity-links', (_, checked) => Main.levelExplorer.toggleShowEntityLinks(checked))
+ipcRenderer.on('menu-toggle-show-grass', (_, checked) => Main.levelExplorer.toggleShowGrass(checked))
 ipcRenderer.on('menu-toggle-show-all-objects', (_, checked) => Main.levelExplorer.toggleShowAllObjects(checked))
+ipcRenderer.on('menu-toggle-full-resolution', (_, checked) => Main.levelExplorer.toggleFullResolution(checked))
 
 window.Main = Main

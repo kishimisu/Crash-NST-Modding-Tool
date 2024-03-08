@@ -1,10 +1,13 @@
 import types_metadata from '../../../../assets/crash/types.metadata'
+import NST_FILE_INFOS from '../../../../assets/crash/files_infos.txt'
 import { BufferView } from '../../../utils'
 
 /**
  * Reads all types metadata, enums metadata and types hierarchy from the metadata file.
  */
 const [TYPES_METADATA, ENUMS_METADATA, TYPES_HIERARCHY] = extract_metadata()
+
+const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
 function extract_metadata() {
     const start = performance.now()
@@ -45,7 +48,13 @@ function extract_metadata() {
         const parent = names[view.readUInt16()]
         const size = view.readUInt16()
         const fieldCount = view.readUInt16()
-        const fields = []
+        const fields = [{
+            name: 'referenceCount',
+            type: 'igUnsignedIntMetaField',
+            offset: 8,
+            size: 8,
+            typeSize: 4,
+        }]
 
         // Add type to hierarchy data
         function addToHierarchy(type, children = null) {
@@ -99,7 +108,7 @@ function extract_metadata() {
         // Update bitfield data
         fields.forEach(field => {
             if (field.type === 'igBitFieldMetaField') {
-                field.parent = fields[field.rootIndex]
+                field.parent = fields[field.rootIndex+1]
                 field.parent.children ??= []
                 field.parent.children.push(field)
                 field.parent.bitfieldParent = true
@@ -143,5 +152,7 @@ function getAllInheritedChildren(type, all_children = new Set()) {
 export {
     TYPES_METADATA,
     ENUMS_METADATA,
+    namespace_hashes,
+    file_types,
     getAllInheritedChildren
 }

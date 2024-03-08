@@ -151,13 +151,13 @@ class ObjectView {
         let additionalOffset = objectSize + (objectSize % 4 == 0 ? 0 : 4 - (objectSize % 4))
 
         for (const field of this.fields.filter(e => e.isMemoryType())) {
+            if (field.children.length == 0) continue
+
             const table = createElm('table', 'data-table')
             const title = createElm('div', null, { marginLeft: '4px', marginTop: '4px', marginBottom: '2px' })
             title.innerText = field.name
             tableCtn.appendChild(title)
             tableCtn.appendChild(table)
-
-            if (field.children.length == 0) continue
 
             let row
 
@@ -277,7 +277,7 @@ class ObjectView {
         }
 
         // Add object's references to the bottom of the field list
-        const refs = this.object.references.filter(e => e.index !== 0).map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
+        const refs = this.object.references.map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
         const div = createElm('div', 'ref-list')
         div.innerHTML = `References: (${refs.length}) ` + refs.join('</p>') + '</p>'
         this.container.appendChild(div)

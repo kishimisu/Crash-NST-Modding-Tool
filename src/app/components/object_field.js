@@ -1,8 +1,6 @@
-import { bitRead, bitReplace } from "../../utils"
-import ObjectView from "./object_view"
+import { bitRead, bitReplace, computeHash } from "../../utils"
 import { createElm } from "./utils/utils"
-import { ENUMS_METADATA, getAllInheritedChildren } from "./utils/metadata"
-import { ipcRenderer } from "electron"
+import { ENUMS_METADATA, file_types, getAllInheritedChildren } from "./utils/metadata"
 
 // Keep track of updated fields within objects
 const updated_data = {}
@@ -506,6 +504,16 @@ class ObjectField {
             }
         }
 
+        const updateState = (parentObject, index, previous_value, new_value, id) => {
+            addUpdatedData(parentObject.index, index, previous_value, new_value, id)
+
+            // Update object's node name in tree view
+            parentObject.updated = Object.keys(updated_data[parentObject.index] ?? {}).length > 0
+            const node = Main.tree.available().find(e => e.objectIndex == parentObject.index)
+            if (!parentObject.updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
+            else if (parentObject.updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
+        }  
+
         if (this.bitfield) 
         {
             if (this.type == 'igBoolMetaField') {
@@ -554,6 +562,26 @@ class ObjectField {
         else if (this.isDropdownType())
         {
             previous_value = object.view.readInt(offset)
+
+            // Update object reference count for igObjectRefMetaField
+            if (this.type == 'igObjectRefMetaField' && file_types[computeHash(Main.igz.path)] == 'igx_entities') {
+                const currentObject = Main.igz.findObject(previous_value)
+                const newObject     = Main.igz.findObject(value)
+                if (currentObject != null && newObject != null) {
+                    const index = currentObject.references.indexOf(object)
+                    if (index > -1) {
+                        const currentValue = currentObject.view.readUInt(8)
+                        const newValue     = newObject.view.readUInt(8)
+                        currentObject.view.setUInt(currentValue - 1, 8)
+                        newObject.view.setUInt(newValue + 1, 8)
+                        updateState(currentObject, 0, currentValue, currentValue - 1)
+                        updateState(newObject, 0, newValue, newValue + 1)
+                    }
+                    else console.warn('Object reference not found:', currentObject, object)
+                }
+                else console.warn('Object not found:', previous_value, value)
+            }
+
             object.view.setInt(value, offset)
             new_value = value
             update_input = false
@@ -564,14 +592,8 @@ class ObjectField {
             input.value = new_value
             input.blur()
         }
-        
-        addUpdatedData(parentObject.index, this.index, previous_value, new_value, id)
 
-        // Update object's node name in tree view
-        parentObject.updated = Object.keys(updated_data[parentObject.index] ?? {}).length > 0
-        const node = Main.tree.available().find(e => e.objectIndex == parentObject.index)
-        if (!parentObject.updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
-        else if (parentObject.updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
+        updateState(parentObject, this.index, previous_value, new_value, id)
     }
 
     isUpdated(id) {

@@ -6,10 +6,8 @@ import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
 
-import NST_FILE_INFOS from '../../assets/crash/files_infos.txt'
-import { TYPES_METADATA } from '../app/components/utils/metadata.js'
+import { TYPES_METADATA, namespace_hashes, file_types } from '../app/components/utils/metadata.js'
 
-const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
 const IGZ_VERSION      = 10
 const IGZ_SIGNATURE    = 0x49475A01
@@ -214,7 +212,7 @@ class IGZ {
             }
         }
 
-        for (const object of this.objects.slice(1)) {
+        for (const object of this.objects.slice(1).filter(e => e.children.length == 0)) {
             for (let i = 0; i < object.size; i += 4) {
                 const inROFS = this.fixups.ROFS.data.includes(object.offset + i)
                 if (!inROFS) continue

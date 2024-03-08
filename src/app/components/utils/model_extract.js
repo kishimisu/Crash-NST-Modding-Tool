@@ -1,5 +1,3 @@
-import igObject from "../../../igz/igObject"
-
 const convertPosition = ([x, y, z], [tx = 0, ty = 0, tz = 0] = []) => ([-x-tx, z+tz, y+ty])
 
 function extractModelData(igz) {
@@ -9,13 +7,13 @@ function extractModelData(igz) {
         return console.warn('No draw call data for ' + igz.path)
 
     const igModelData = igz.objects.find(e => e.type === 'igModelData')
-    const transforms = igModelData.extractMemoryData(igz, 0x40 + 8, 8).map(e => {
+    const transforms = igModelData.extractMemoryData(igz, 0x40 + 8, 8).data.map(e => {
         const object = igz.findObject(e)
         if (object == null) return [0, 0, 0]
         return object.view.readVector(3, 0x50)
     })
-    const transformHierarchy = igModelData.extractMemoryData(igz, 0x58 + 8)
-    const transformIndices = igModelData.extractMemoryData(igz, 0x88 + 8)
+    const transformHierarchy = igModelData.extractMemoryData(igz, 0x58 + 8).data
+    const transformIndices = igModelData.extractMemoryData(igz, 0x88 + 8).data
 
     const getAnimatedTransform = (drawCallIndex) => {
         let transformIndex = transformIndices[drawCallIndex] - 1
@@ -77,21 +75,6 @@ function extractModelData(igz) {
 
     const drawCalls = igModelDrawCallData.map(processDrawCall)
     return { drawCalls }
-}
-
-igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
-    const memSize = this.view.readUInt(offset)
-    const dataOffset = this.view.readUInt(offset + 8)
-    const elementCount = memSize / elementSize
-    const object = igz.findObject(dataOffset)
-    const startOffset = igz.getGlobalOffset(dataOffset) - object.global_offset
-    
-    const data = []
-    for (let i = 0; i < elementCount; i++) {
-        data.push(object.view.readUInt(startOffset + i * elementSize))
-    }
-
-    return data
 }
 
 export { 

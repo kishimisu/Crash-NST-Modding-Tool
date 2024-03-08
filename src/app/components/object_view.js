@@ -2,6 +2,7 @@ import ObjectField, { clearUpdatedData } from './object_field'
 import { createElm, elm } from "./utils/utils"
 import { bitRead, isVectorZero } from '../../utils'
 import { TYPES_METADATA } from './utils/metadata'
+import { ipcRenderer } from 'electron'
 
 // Save interesting fields on IGZ load (fields that have 
 // different values between objects of the same type)
@@ -38,7 +39,6 @@ class ObjectView {
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
             elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
 
-            this.findAllMemoryFields()
             this.findInterestingFields()
             this.createFieldList()
             this.createHexDataCells()
@@ -50,6 +50,18 @@ class ObjectView {
      * and sets their parent and children references.
      */
     initFields(fields) {
+        if (this.object.type == 'CVscComponentData' && this.object.references.length > 1) {
+            const parent = this.object.references[1]
+            const childIndex = parent.children.findIndex(e => e.object === this.object)
+            let { data } = parent.extractMemoryData(Main.igz, 0x20, 8)
+            data = data.filter(e => e != 0)
+
+            const tstrIndex = data[childIndex]
+            const name = Main.igz.fixups.TSTR?.data[tstrIndex].replace('archetype_', '')
+
+            fields = TYPES_METADATA[name] ?? fields
+        }
+
         fields = fields.map(e => new ObjectField(e))
         fields.forEach(e => {
             e.object = this.object
@@ -65,38 +77,44 @@ class ObjectView {
     createHexDataCells() {
         const bytesPerRow = 4 * 6
 
-        const tableCtn = elm('#data-table-ctn')
-        const table = createElm('table', 'data-table')
-        table.id = 'data-table'
-        table.onmouseleave = () => this.onMouseLeave()
-        
-        let row = createElm('tr')
-        this.hexCells = []
-
-        tableCtn.innerHTML = ''
-        tableCtn.appendChild(table)
         Main.showObjectDataView(true)
 
-        // Iterate over every 4 bytes of the object's data
-        for (let i = 0; i <= this.object.data.length - 4; i += 4) {
-            const value = this.object.view.readInt(i)
+        const tableCtn = elm('#data-table-ctn')
+        const table = createElm('table', 'data-table')
+        tableCtn.onmouseleave = () => this.onMouseLeave()
+        tableCtn.appendChild(table)
 
-            // Create offset column
-            if (i % bytesPerRow == 0) {
-                const offsetCell = createElm('td')
-                offsetCell.innerText = '0x' + i.toString(16).toUpperCase().padStart(4, '0')
-                offsetCell.classList.add('hex-offset')
-                row.appendChild(offsetCell)
+        this.hexCells = []
+
+        const createRow = (table, rowID) => {
+            const row = createElm('tr')
+            table.appendChild(row)
+
+            const offsetCell = createElm('td')
+            offsetCell.innerText = '0x' + (rowID * bytesPerRow).toString(16).toUpperCase().padStart(4, '0')
+            offsetCell.classList.add('hex-offset')
+            row.appendChild(offsetCell)
+
+            return row
+        }
+
+        const createCell = (row, value, offset) => {
+            const cell = createElm('td', 'hex-zero')
+            row.appendChild(cell)
+
+            if (value == null) {
+                cell.style.color = 'transparent'
+                cell.innerText = '00 00 00 00'
+                return
             }
 
-            // Create hex cell DOM element
-            const cell = createElm('td', 'hex-zero')
             cell.innerText = (value >>> 0).toString(16).toUpperCase().padStart(8, '0').replace(/(.{2})/g, '$1 ')
+            
             if ((localStorage.getItem('big-endian') ?? 'true') === 'false') 
                 cell.innerText = cell.innerText.split(' ').reverse().join(' ')
-            
+
             // Create hex cell object
-            const hexCell = { element: cell, offset: i }
+            const hexCell = { element: cell, offset }
             this.hexCells.push(hexCell)
 
             // Add mouse events
@@ -105,22 +123,69 @@ class ObjectView {
                 if (this.selected == null) 
                     this.onCellHover(hexCell)
             }
+        }
 
-            // Add to row
-            row.appendChild(cell)
+        // Create default fields
+        let objectSize = Main.igz.fixups.MTSZ.data[this.object.typeID]
 
-            if (i % bytesPerRow == bytesPerRow - 4) {
-                table.appendChild(row)
-                row = createElm('tr')
+        if (this.object.type == 'CVscComponentData') {
+            const lastField = this.fields.reduce((a, b) => b.offset > a.offset ? b : a)
+            const lastOffset = lastField.offset + lastField.size
+            objectSize = lastOffset + (lastOffset % 4 == 0 ? 0 : 4 - (lastOffset % 4))
+        }
+
+        const rowCount = Math.ceil(objectSize / bytesPerRow)
+
+        for (let i = 0; i < rowCount; i++) {
+            const row = createRow(table, i)
+
+            for (let k = 0; k < bytesPerRow; k += 4) {
+                const offset = i * bytesPerRow + k
+                if (offset > objectSize - 4) break
+
+                const value = this.object.view.readInt(offset)
+                createCell(row, value, offset)
             }
-            if (i == this.object.data.length - 4) {
-                table.appendChild(row)
+        }
+
+        let additionalOffset = objectSize + (objectSize % 4 == 0 ? 0 : 4 - (objectSize % 4))
+
+        for (const field of this.fields.filter(e => e.isMemoryType())) {
+            const table = createElm('table', 'data-table')
+            const title = createElm('div', null, { marginLeft: '4px', marginTop: '4px', marginBottom: '2px' })
+            title.innerText = field.name
+            tableCtn.appendChild(title)
+            tableCtn.appendChild(table)
+
+            if (field.children.length == 0) continue
+
+            let row
+
+            for (let i = 0; i < field.children.length; i++) {
+                const size = Math.min(4, field.element_size)
+                field.children[i].offset = Math.floor(additionalOffset/4)*4
+
+                for (let k = 0; k < field.element_size; k += 4) {
+                    const hexOffset = i * field.element_size + k
+
+                    if (hexOffset % bytesPerRow == 0)
+                        row = createRow(table, hexOffset)
+
+                    const offset = field.children[i].ref_data_offset + k
+                    const value = field.ref_object.view.readInt(offset)
+
+                    if (additionalOffset % 4 == 0)
+                        createCell(row, value, additionalOffset)
+
+                    additionalOffset += size
+                }
             }
-            if (i >= 4 * 1000) {
-                const end = createElm('div', '', { textAlign: 'center', margin: '10px' })
-                end.innerText = `+ ${this.object.data.length - i} more bytes...`
-                table.parentNode.appendChild(end)
-                break
+
+            additionalOffset += (additionalOffset % 4) == 0 ? 0 : 4 - (additionalOffset % 4)
+
+            const missingRows = bytesPerRow/4 - row.children.length + 1
+            for (let i = 0; i < missingRows; i++) {
+                createCell(row, null, additionalOffset)
             }
         }
 
@@ -138,9 +203,6 @@ class ObjectView {
         for (let i = 0; i < this.fields.length; i++) {
             const field = this.fields[i]
 
-            // Skip fields that do not point to this object (some igMemoryRef elements)
-            if (field.object !== this.object) continue
-
             // If bitfield, colorize root cell with the first children only
             if (field.bitfield && field.offset - field.parent.offset > 0) continue
 
@@ -148,10 +210,14 @@ class ObjectView {
             
             // Colorize corresponding data cells
             for (let j = 0; j < Math.ceil(field.size / 4); j++) {
-                const cell = this.hexCells[Math.floor(field.offset / 4) + j].element
+                const cell = this.hexCells[Math.floor(field.offset / 4) + j]?.element
+                if (cell == null) continue
                 const isLong = field.isLongType()
-                const method = isLong ? 'Int' : field.getIntegerMethod() ?? 'Int'
-                const value = this.object.view['read' + method](field.offset + j * 4) >>> 0
+                const method = 'read' + (isLong ? 'Int' : field.getIntegerMethod() ?? 'Int')
+                const isMemoryChild = field.parent?.isMemoryType()
+                const object = isMemoryChild ? field.ref_object : this.object
+                const offset = isMemoryChild ? field.ref_data_offset : field.offset
+                const value  = object.view[method](offset + j * 4)  >>> 0
                 const isValid = value != 0 && value != 0xFFFFFFFF
                 
                 if ((field.colorized == null && isValid) || (field.colorized === true && (j == 0 || isValid))) {
@@ -188,10 +254,6 @@ class ObjectView {
         this.container.onmouseleave = () => this.onMouseLeave()
         Main.showObjectDataView(true)
 
-        if (this.object.type == 'CVscComponentData') {
-            this.createCommonSpawnerTemplate()
-        }
-
         // Setup MemoryRef fields
         for (const field of this.fields) {
             if (field.type == 'igMemoryRefMetaField') {
@@ -202,13 +264,9 @@ class ObjectView {
             }
         }
 
-        // Link unassigned data defined in external memory fields
-        memory_fields.fields.filter(e => e.ref_object == this.object)
-                            .forEach(e => this.fields.push(e, ...e.children))
-
         // Create all fields
         for (const [index, field] of Object.entries(this.fields)) {
-            field.index ??= parseInt(index)
+            field.index = parseInt(index)
 
             const row = field.createField({
                 onChange: this.onFieldUpdate.bind(this, field),
@@ -226,9 +284,7 @@ class ObjectView {
     }
 
     /**
-     * Setup additional fields for MemoryRef fields:
-     * _size, _bitfield, _address and all children elements
-     * Also matches _keys and _values fields
+     * Setup additional fields for MemoryRef children fields
      */
     setupMemoryRefField(field, igMemoryRefOffset = 0) {
         if (field.children) return
@@ -239,7 +295,7 @@ class ObjectView {
             const mem = {
                 field,
                 memSize:     this.object.view.readUInt(field.offset + igMemoryRefOffset),
-                active:      (bitfield >> 0x18) & 0x1 != 0x0,
+                active:      ((bitfield >> 0x18) & 0x1) != 0x0,
                 dataOffset:  this.object.view.readUInt(field.offset + igMemoryRefOffset + 8),
                 elementSize: field.getTypeSize(field.memType),
             }
@@ -253,7 +309,6 @@ class ObjectView {
 
         const addMemoryElement = (mem, index, offset) => {
             const field = new ObjectField({
-                index:  index,
                 name:   `${mem.field.name} #${index}`,
                 type:    mem.field.memType,
                 refType: mem.field.elmType,
@@ -261,6 +316,8 @@ class ObjectView {
                 parent:  mem.field,
                 object:  mem.object,
                 offset:  offset,
+                ref_object: mem.object,
+                ref_data_offset: offset,
             })
             mem.field.children.push(field)
         }
@@ -275,8 +332,6 @@ class ObjectView {
             mem.field.ref_data_offset = mem.startOffset
             mem.field.collapsable     = mem.field.element_count > 0
             mem.field.memory_active   = mem.active
-
-            if (mem.field.ref_object != mem.field.object) mem.field.name += ' (external)'
 
             const fieldID = this.fields.indexOf(mem.field)
             this.fields = this.fields.slice(0, fieldID + 1).concat(mem.field.children).concat(this.fields.slice(fieldID + 1))
@@ -300,10 +355,9 @@ class ObjectView {
                     // TODO: Should include fixup lookup
                     if (keys.field.isIntegerType(keys.field.memType) && key >>> 0 == 0xFAFAFAFA) continue
                     else if (key == 0) continue
-                    
+
                     addMemoryElement(keys, index, keyOffset) // Add key
                 }
-
 
                 const valueOffset = values.startOffset + k * values.elementSize
                 addMemoryElement(values, index++, valueOffset) // Add value
@@ -313,52 +367,16 @@ class ObjectView {
         updateField(keys)
     }
 
-    createCommonSpawnerTemplate() {
-        let offset = this.object.view.readInt(0x18) - this.object.offset
-        const _metaObject = this.object.view.readInt(0x20)
-        const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
-        const handle = Main.igz.named_externals[_metaObject]
-
-        if (!inRNEX || handle[0] != 'common_Spawner_TemplateData') return
-
-        const fields = [
-            { name: 'ActivateCheckpointLoad', type: 'igBoolMetaField', size: 1 },
-            { name: 'ActivateOnSpawn', type: 'igBoolMetaField', size: 1 },
-            { name: 'RespawnOnDeath', type: 'igBoolMetaField', size: 1 },
-            { name: 'SpawnOnEnter', type: 'igBoolMetaField', size: 1 },
-            { name: 'WaitForSpawnTemplateEvent', type: 'igBoolMetaField', size: 4 },
-            { name: 'SpawnAtEntity', type: 'igHandleMetaField', size: 8 },
-            { name: 'UsedEntityToSpawn', type: 'igHandleMetaField', size: 8 },
-            { name: 'TriggerVolume', type: 'igHandleMetaField', size: 8 },
-            { name: 'EntityToSpawn', type: 'igHandleMetaField', size: 8 },
-            { name: 'InitialDelay', type: 'igFloatMetaField', size: 4 },
-            { name: 'DeathRespawnTimer', type: 'igFloatMetaField', size: 4 },
-            { name: 'Bool_id_j3kcr18d', type: 'igBoolMetaField', size: 1 },
-            { name: 'Bool_id_o8p58cmq', type: 'igBoolMetaField', size: 1 },
-            { name: 'NewEnum11_id_6xic0fuw', type: 'igEnumMetaField', size: 2 },
-            { name: 'Bool_id_x2ny9dmw', type: 'igBoolMetaField', size: 4 },
-            { name: 'Bool_id_9b50frs9', type: 'igBoolMetaField', size: 4 },
-            { name: 'Bool_id_tm3edvov', type: 'igBoolMetaField', size: 4 },
-        ]
-        .map(e => {
-            offset += e.size
-            return new ObjectField({
-                object: this.object,
-                offset: offset - e.size,
-                refType: e.type == 'igObjectRefMetaField' ? 'CEntity' : null,
-                ...e,
-            })
-        })
-
-        this.fields.push(...fields)
-    }
-
     // Update an object's data when a field is modified
     // Apply changes to all objects if the "Apply to all" checkbox is checked
     onFieldUpdate(field, value, id) {
         const searchMatches = Main.tree.matched()
 
         if (elm('#apply-all-checkbox').checked && searchMatches.length > 0) {
+            
+            if (field.ref_object)
+                return ipcRenderer.send('show-warning-message', 'Multi-object editing not supported for memory fields.')
+
             searchMatches.each((e, i) => {
                 const object = Main.igz.objects[e.objectIndex]
                 field.updateObject(object, value, i == 0, id)
@@ -387,21 +405,13 @@ class ObjectView {
     // Sets the hex cells and fields references
     setupCellsAndFields() {
         for (const field of this.fields) {
-            if (field.object !== this.object) continue
             const cellStart = Math.floor(field.offset / 4)
             const cellEnd   = Math.ceil((field.offset + field.size) / 4)
             field.hexCells = this.hexCells.slice(cellStart, cellEnd)
-            
-            if (field.isMemoryType() && field.object == this.object) {
-                // Add all data cells to igMemoryRef fields
-                const dataStart = Math.floor(field.ref_data_offset / 4)
-                const dataEnd   = Math.ceil((field.ref_data_offset + field.memory_size) / 4)
-                field.hexCells.push(...this.hexCells.slice(dataStart, dataEnd))
-            }
         }
 
         for (const cell of this.hexCells) {
-            cell.fields = this.fields.filter(e => e.object == this.object && cell.offset >= e.offset && cell.offset < e.offset + e.size)
+            cell.fields = this.fields.filter(e => cell.offset >= e.offset && cell.offset < e.offset + e.size)
         }
     }
 
@@ -427,6 +437,7 @@ class ObjectView {
             let firstValue = null
 
             if (field.children) continue
+            if (this.object.type == 'CVscComponentData' && i > 4) continue
 
             if (field.bitfield) {
                 const bytes = allObjects[0].view.readInt(field.offset)
@@ -458,42 +469,6 @@ class ObjectView {
         }
 
         interesting_fields.fields[this.object.type] = interestingFields
-    }
-
-    // Find all memory fields pointing to external data in the igz file
-    findAllMemoryFields() {
-        if (memory_fields.igz == Main.igz) return // Only run once per igz file
-
-        memory_fields.igz = Main.igz
-        memory_fields.fields = []
-
-        for (const obj of Main.igz.objects) {
-            const mems = new ObjectView(obj, false)
-                            .findMemories()
-                            .filter(e => e.ref_object != e.object)
-
-            memory_fields.fields.push(...mems.map(e => {
-                e.name = `(${obj.getDisplayName()})`
-                return e
-            }))
-        }
-    }
-
-    // Find all memory fields in the object's fields
-    findMemories() {
-        const memories = []
-
-        const addMemory = (field, offset = 0) => {
-            this.setupMemoryRefField(field, offset)
-            if (!field.children?.length) return
-            memories.push(field)
-        }
-        this.fields.forEach(e => {
-            if (e.type == 'igMemoryRefMetaField')   addMemory(e)
-            else if (e.type == 'igVectorMetaField') addMemory(e, 8)
-        })
-
-        return memories
     }
 
     // Sets the currently selected field and cell
@@ -530,8 +505,7 @@ class ObjectView {
             e.element.style.backgroundColor = field.hexCells.includes(e) ? this.hoverColor : ''
         })
 
-        if (this.object == field.object)
-            field.hexCells[0].element.parentNode.scrollIntoViewIfNeeded()
+        field.hexCells[0]?.element.parentNode.scrollIntoViewIfNeeded()
     }
 
     onCellHover(cell, forceSelect = false) {

@@ -44,8 +44,8 @@ class ObjectField {
         this.element_count = null      // (igMemoryRef, Vec2f, Vec3f, Vec4f, Matrix44f, Quaternionf) Number of elements in the field
         this.memory_size   = null      // (igMemoryRef) Total size of the memory
         this.memory_active = false     // (igMemoryRef, igRawRef) Whether the memory is active (known from its bitfield)
-        this.ref_object    = null      // (igMemoryRef, igRawRef) Object containing the MemoryRef's data
-        this.ref_data_offset = null    // (igMemoryRef, igRawRef) Data start offset relative to the ref_object
+        this.ref_object    = props.ref_object // (igMemoryRef, igRawRef) Object containing the MemoryRef's data
+        this.ref_data_offset = props.ref_data_offset // (igMemoryRef, igRawRef) Data start offset relative to the ref_object
 
         this.interesting = false    // Whether the field can have multiple values between different objects
 
@@ -96,15 +96,11 @@ class ObjectField {
         else if (this.collapsed) row.style.display = 'none'
 
         // Add MemoryRef click event
-        if (this.isMemoryType() && this.memory_active) {
+        if (this.isMemoryType() && this.memory_active && this.element_count > 0) {
             name.onclick = () => this.onMemoryRefClick()
             type.onclick = () => this.onMemoryRefClick()
             name.style.cursor = 'pointer'
             type.style.cursor = 'pointer'
-        }
-        else if (this.type == 'igRawRefMetaField' && this.memory_active) {
-            row.onclick = () => this.onMemoryRefClick()
-            row.style.cursor = 'pointer'
         }
 
         row.onmouseover = onHover
@@ -333,7 +329,6 @@ class ObjectField {
             const selected = enums.find(e => e.value == value).name
             const input = this.createCustomListInput([names], selected, false)
             input.onchange = () => {
-                console.log(input.value, enums.map(e=>e.name), enums.find(e => e.name == input.value))
                 this.onChange(enums.find(e => e.name == input.value)?.value ?? 0)
             }
             this.colorized = ['none', 'invalid', 'default'].every(e => !selected.toLowerCase().includes(e))
@@ -461,33 +456,32 @@ class ObjectField {
 
     // Goto the referenced object and focus the corresponding cell in the hex view
     onMemoryRefClick() {
-        // Focus in hex view
-        if (this.object != this.ref_object) Main.objectView = new ObjectView(this.ref_object)
-        const refCell = Main.objectView.hexCells.find(e => e.offset == this.ref_data_offset)
+        const refCell = Main.objectView.hexCells.find(e => e.offset == this.children[0].offset)
 
         if (refCell) {
             Main.objectView.setSelected(refCell.fields[0], refCell, true)
             refCell.element.scrollIntoViewIfNeeded()
         }
-
-        // Focus in tree view
-        const refNode = Main.tree.available().find(e => e.objectIndex == this.ref_object.index)
-        refNode?.expandParents()
-        refNode?.select()
+        else console.warn('Memory reference not found:', this.name)
     }
 
     updateObject(object, value, update_input = false, id = 0) {
         let previous_value = null
         let new_value = null
 
-        if (update_input && this.parent?.type == 'igMemoryRefMetaField' && this.parent.ref_object != object) {
-            return ipcRenderer.send('show-warning-message', 'Updating data from other objects not supported yet. Please update the data from its original object.')
+        let parentObject = object
+        let offset = this.offset
+
+        if (this.parent?.isMemoryType()) {
+            // Hack for memory ref children update
+            object = this.ref_object
+            offset = this.ref_data_offset
         }
 
         const relativeCalculation = (type, id) => {
             const readMethod = 'read' + type
             const writeMethod = 'set' + type
-            const dataOffset = this.offset + (id ?? 0) * 4
+            const dataOffset = offset + (id ?? 0) * 4
             const isLong = this.isLongType()
 
             previous_value = object.view[readMethod](dataOffset)
@@ -515,21 +509,21 @@ class ObjectField {
         if (this.bitfield) 
         {
             if (this.type == 'igBoolMetaField') {
-                const previous = object.view.readUInt(this.offset)
+                const previous = object.view.readUInt(offset)
                 value = bitReplace(previous, value, 1, this.shift)
-                object.view.setUInt(value, this.offset)
+                object.view.setUInt(value, offset)
                 previous_value = bitRead(previous, 1, this.shift)
                 new_value = bitRead(value, 1, this.shift)
                 update_input = false
             }
             else if (this.isIntegerType() || this.type == 'igEnumMetaField') {
                 const method = this.getIntegerMethod()
-                const previous = object.view['read' + method](this.offset)
+                const previous = object.view['read' + method](offset)
                 const toSigned = (x) => (x << (32 - this.bits)) >> (32 - this.bits)
 
                 value = parseInt(value) >>> 0
                 value = bitReplace(previous, value, this.bits, this.shift)
-                object.view['set' + method](value, this.offset)
+                object.view['set' + method](value, offset)
 
                 previous_value = bitRead(previous, this.bits, this.shift)
                 new_value = bitRead(value, this.bits, this.shift)
@@ -552,15 +546,15 @@ class ObjectField {
         }
         else if (this.type == 'igBoolMetaField') 
         {
-            previous_value = object.view.readByte(this.offset)
-            object.view.setByte(value, this.offset)
+            previous_value = object.view.readByte(offset)
+            object.view.setByte(value, offset)
             new_value = value
             update_input = false
         }
         else if (this.isDropdownType())
         {
-            previous_value = object.view.readInt(this.offset)
-            object.view.setInt(value, this.offset)
+            previous_value = object.view.readInt(offset)
+            object.view.setInt(value, offset)
             new_value = value
             update_input = false
         }
@@ -571,19 +565,20 @@ class ObjectField {
             input.blur()
         }
         
-        addUpdatedData(object.index, this.index, previous_value, new_value, id)
+        addUpdatedData(parentObject.index, this.index, previous_value, new_value, id)
 
         // Update object's node name in tree view
-        object.updated = Object.keys(updated_data[object.index] ?? {}).length > 0
-        const node = Main.tree.available().find(e => e.objectIndex == object.index)
-        if (!object.updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
-        else if (object.updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
+        parentObject.updated = Object.keys(updated_data[parentObject.index] ?? {}).length > 0
+        const node = Main.tree.available().find(e => e.objectIndex == parentObject.index)
+        if (!parentObject.updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
+        else if (parentObject.updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
     }
 
     isUpdated(id) {
-        if (updated_data[this.object.index] == null) return false
-        if (updated_data[this.object.index][this.index] == null) return false
-        if (id != null && updated_data[this.object.index][this.index][id] == null) return false
+        const object = this.parent?.object ?? this.object
+        if (updated_data[object.index] == null) return false
+        if (updated_data[object.index][this.index] == null) return false
+        if (id != null && updated_data[object.index][this.index][id] == null) return false
         return true
     }
 

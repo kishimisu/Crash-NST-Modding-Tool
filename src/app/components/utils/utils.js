@@ -29,16 +29,6 @@ const getBackupFolder = (...props) => {
 const getCacheFolder = (...props) => {
     const folder = getGameFolder('custom_data', 'cache')
     if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
-    else {
-        // Clear cache if version changed
-        const current_cache_version = '1'
-        if (localStorage.getItem('cache-version') !== current_cache_version) {
-            localStorage.setItem('cache-version', current_cache_version)
-            rmdirSync(folder, { recursive: true})
-            mkdirSync(folder, { recursive: true })
-            console.log('Cache cleared')
-        }
-    }
     return join(folder, ...props.map(e => e.toString()))
 }
 

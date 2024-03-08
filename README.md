@@ -1,15 +1,20 @@
-## A work-in-progress tool for modding the Crash NST PC game
+## Modding Tool for Crash NST (PC)
 
 This tool lets you explore and edit .pak archives and .igz files for the PC version of Crash NST.
 
-You can edit igz directly from within pak archives and rebuild new archives without having to leave the app.
+![demo](./assets/images/demo3.jpg)
 
-This is an early demo, bugs may appear. Feedback and contributions are welcome!
+Some of the features:
+- Import .igz files from other archives + automatic dependency import
+- Extract, Clone, Replace, Enable/Disable and Delete files from archives
+- 3D Model Preview for actors and models files
+- Possibility to view and edit all properties for objects in .igz files
+- Interactive 3D Level Explorer, with some editing capabilities
+- Ctrl+L to quickly save + update + launch the game
+- Quickly backup/restore individual levels or the entire game folder
 
 You can download it for Windows on [the release page](https://github.com/kishimisu/Crash-NST-Modding-Tool/releases).
 For other OS, see below for build instructions.
-
-![demo](./assets/images/demo3.jpg)
 
 ## Table of Contents
 [PAK Editor](#pak)  
@@ -101,16 +106,6 @@ When opening a .igz file, every object will be scanned to check for "interesting
 #### Additional infos
 Depending on their type, detailed informations are available when hovering the name and type of properties.
 
-#### Copy/Paste (Disabled)
-For complex types like Object References, String Reference, Vectors, Arrays or Matrices, you have the possibility to right-click on a field to copy the value to your clipboard. You can also use it to paste data between properties of the same type.
-
-#### Spawn at Vector (Disabled)
-Two additional options become available when right-clicking on Vector3f properties:
-- Spawn Here : Launches the game while spawning Crash at the selected location, without saving or updating the current archive.
-- Spawn on Crate : Same, but it will also spawn a crate at the specified location.
-
-The can help you visualize the position of objects in a level.
-
 <a name="explorer"></a>
 ## Level Explorer
 
@@ -188,10 +183,7 @@ IGZ Editor:
 Level Explorer:
 - **src/app/level_explorer.js**: Manages the Level Explorer
 
-## TODO
-- Texture & Audio preview
-- Add compressed mode to avoid having to uncompress every file
-
 ## Special Thanks
 - Crash NST modding Discord: https://discord.gg/4JhhFNWk
-- igArchiveLib repo: https://github.com/LG-RZ/igArchiveLib/tree/master
+- igArchiveLib: https://github.com/LG-RZ/igArchiveLib/tree/master
+- igzModelConverter: https://github.com/AdventureT/IgzModelConverter

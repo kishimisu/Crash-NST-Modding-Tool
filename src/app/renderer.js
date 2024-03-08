@@ -14,6 +14,7 @@ import LevelExplorer from './components/level_explorer.js'
 import { clearUpdatedData } from './components/object_field.js'
 import { init_file_import_modal } from './components/import_modal.js'
 import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
+import './components/utils/igObjectExtension.js'
 
 import levels from '../../assets/crash/levels.txt'
 import '../../assets/styles/style.css'
@@ -245,7 +246,7 @@ class Main {
 
     // Show or hide the object data view (data table + field table)
     static showObjectDataView(visible = false) {
-        elm('#data-table').innerHTML = ''
+        elm('#data-table-ctn').innerHTML = ''
         elm('#data-view').style.display = visible ? 'flex' : 'none'
         elm('#object-view-ctn').style.display = visible ? 'block' : 'none'
         elm('#objects-fields-title').style.display = visible ? 'flex' : 'none'
@@ -254,7 +255,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.13 - '
+        const title = 'The Apprentice v1.14 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -983,6 +984,11 @@ async function main()
             localStorage.setItem('game_folder', defaultGameFolder)
             await backupGameFolder()
         }
+    }
+    
+    const gameFolder = localStorage.getItem('game_folder')
+    if (gameFolder == null || !existsSync(gameFolder)) {
+        localStorage.setItem('game_folder', '')
     }
     
     loadFile(localStorage.getItem('last_file'))

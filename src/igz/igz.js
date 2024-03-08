@@ -7,6 +7,7 @@ import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
 
 import NST_FILE_INFOS from '../../assets/crash/files_infos.txt'
+import { TYPES_METADATA } from '../app/components/utils/metadata.js'
 
 const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
@@ -171,25 +172,61 @@ class IGZ {
 
         /// Get children + references ///
 
-        for (const offset of this.fixups.ROFS.data) {
-            const global_offset = this.getGlobalOffset(offset & 0xfbffffff)
-            const object = this.objects.find(e => global_offset >= e.global_offset && global_offset < e.global_offset + e.size)
-            
-            const relative_offset = global_offset - object.global_offset
-            const value = object.view.readInt(relative_offset)
+        for (const object of this.objects) {
+            const fields = { object: [], memory: [],  vector: [] }
 
-            const child_global_offset = this.getGlobalOffset(value)
-            const child = this.objects.find(e => child_global_offset >= e.global_offset && child_global_offset < e.global_offset + e.size)
-            
-            if (object !== child && child != null) {
-                if (!object.children.some(e => e.object == child)) {
-                    object.children.push({ object: child, offset: relative_offset })
-                }
-                if (!child.references.some(e => e == object)) {
+            TYPES_METADATA[object.type].forEach(e => {
+                if (e.type == 'igObjectRefMetaField') fields.object.push(e)
+                if (e.type == 'igMemoryRefMetaField') fields.memory.push(e)
+                if (e.type == 'igVectorMetaField') fields.vector.push(e)
+            })
+
+            const addChild = (offset, offsetROFS) => {
+                if (offset == 0 || !this.fixups.ROFS.data.includes(offsetROFS)) return
+
+                const child = this.findObject(offset)
+
+                if (child != null && child != object) {
+                    object.children.push({ object: child, offset: offsetROFS })
                     child.references.push(object)
                 }
             }
-            else if (child == null) console.warn('No object found for offset', offset, global_offset, object.getName(), value)
+
+            for (const ref of fields.object) {
+                const offset = object.view.readUInt(ref.offset)
+                addChild(offset, object.offset + ref.offset, ref.offset)
+            }
+
+            for (const ref of fields.memory.concat(fields.vector)) {
+                if (ref.memType != 'igObjectRefMetaField') continue
+
+                const offset = object.view.readUInt(ref.offset)
+                if (offset == 0) continue
+
+                const child = this.findObject(offset)
+
+                if (child != null) {
+                    const isMemoryRef = ref.type == 'igMemoryRefMetaField'
+                    const {data, offsets, dataOffset, active} = object.extractMemoryData(this, ref.offset + (isMemoryRef ? 0 : 8), 8)
+                    if (active)
+                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8, offsets[i]))
+                }
+            }
+        }
+
+        for (const object of this.objects.slice(1)) {
+            for (let i = 0; i < object.size; i += 4) {
+                const inROFS = this.fixups.ROFS.data.includes(object.offset + i)
+                if (!inROFS) continue
+
+                const offset = object.view.readUInt(i)
+                const child = this.findObject(offset)
+
+                if (child != null && child != object && child.nameID != -1 && child.references.length == 1) {
+                    object.children.push({ object: child, offset })
+                    child.references.push(object)
+                }
+            }
         }
     }
 
@@ -553,7 +590,7 @@ class IGZ {
                     children: singleChildren.map(e => e.toNodeTree(recursive))
                 })
         }
-        else {
+        else if (unreferenced.length == 0) {
             root = [{text: 'No Objects'}]
         }
 

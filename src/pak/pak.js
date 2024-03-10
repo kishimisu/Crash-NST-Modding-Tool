@@ -306,6 +306,8 @@ class Pak {
             package_file.compression = 0xFFFFFFFF
             package_file.original = false
             package_file.updated = true
+
+            this.package_igz = IGZ.fromFileInfos(package_file)
         }
     }
 

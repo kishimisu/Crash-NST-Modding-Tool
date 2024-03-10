@@ -1,8 +1,9 @@
 import ObjectField, { clearUpdatedData } from './object_field'
 import { createElm, elm } from "./utils/utils"
 import { bitRead, isVectorZero } from '../../utils'
-import { TYPES_METADATA } from './utils/metadata'
+import { ENUMS_METADATA, TYPES_METADATA, TYPES_SIZES } from './utils/metadata'
 import { ipcRenderer } from 'electron'
+import IGZ from '../../igz/igz'
 
 // Save interesting fields on IGZ load (fields that have 
 // different values between objects of the same type)
@@ -48,18 +49,11 @@ class ObjectView {
     /**
      * Converts fields infos to ObjectField instances
      * and sets their parent and children references.
-     */
+     */ 
     initFields(fields) {
-        if (this.object.type == 'CVscComponentData' && this.object.references.length > 1) {
-            const parent = this.object.references[1]
-            const childIndex = parent.children.findIndex(e => e.object === this.object)
-            let { data } = parent.extractMemoryData(Main.igz, 0x20, 8)
-            data = data.filter(e => e != 0)
-
-            const tstrIndex = data[childIndex]
-            const name = Main.igz.fixups.TSTR?.data[tstrIndex].replace('archetype_', '')
-
-            fields = TYPES_METADATA[name] ?? fields
+        if (this.object.type == 'CVscComponentData') {
+            const vscFields = this.initCVscComponentDataFields()
+            if (vscFields) fields = fields.concat(vscFields)
         }
 
         fields = fields.map(e => new ObjectField(e))
@@ -69,6 +63,65 @@ class ObjectView {
             if (e.children) e.children = e.children.map(c => fields.find(f => f.name === c.name))
         })
         return fields
+    }
+
+    /**
+     * Scan the parent .pak archive for the corresponding VSC file,
+     * and extract the fields from its igVscDataMetaObject
+     * 
+     * @returns {ObjectField[]} Additional fields
+     */
+    initCVscComponentDataFields() {
+        const id     = this.object.view.readUInt(0x20)
+        const metaObject = Main.igz.named_externals[id] [1]
+        const vsc = Main.pak?.files.find(e => e.path.includes(metaObject))
+
+        const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
+        if (!inRNEX) console.warn('CVscComponentData not in RNEX')
+
+        if (vsc) {
+            const igz = IGZ.fromFileInfos(vsc)
+            igz.setupChildrenAndReferences()
+            const vscData = igz.objects.find(e => e.type == 'igVscDataMetaObject')
+            
+            if (vscData) {
+                let currentOffset = 0x28
+
+                const vscFields = vscData.children.slice(1).map((child, i) => {
+                    const field     = child.object
+                    const size      = TYPES_SIZES[field.type].size
+                    const alignment = TYPES_SIZES[field.type].alignment
+                    const offset    = ((currentOffset + (alignment - 1)) & -alignment)
+
+                    const newField = new ObjectField({
+                        name: field.name.replace('_metaField', ''),
+                        type: field.type,
+                        size,
+                        offset,
+                    })
+
+                    // Extract enum option names and values from igVectors
+                    if (field.type == 'igEnumMetaField') {
+                        if (field.children.length == 1) {
+                            const enumObject = field.children[0].object
+                            const names  = enumObject.extractMemoryData(igz, 0x20+8, 8).data.map(e => igz.fixups.TSTR.data[e])
+                            const values = enumObject.extractMemoryData(igz, 0x38+8, 4).data
+                            ENUMS_METADATA[newField.name] = new Array(names.length).fill(0).map((e, i) => ({ name: names[i], value: values[i] }))
+                            newField.enumType = newField.name
+                        }
+                        else console.warn('igEnumMetaField children count mismatch (!= 1)', field.children.length)
+                    }
+
+                    currentOffset = offset + size
+
+                    return newField
+                })
+
+                return vscFields
+            }
+            else console.warn('igVscDataMetaObject not found')
+        }
+        else console.warn('VSC not found')
     }
 
     /**
@@ -151,7 +204,7 @@ class ObjectView {
         let additionalOffset = objectSize + (objectSize % 4 == 0 ? 0 : 4 - (objectSize % 4))
 
         for (const field of this.fields.filter(e => e.isMemoryType())) {
-            if (field.children.length == 0) continue
+            if (!field.children.length) continue
 
             const table = createElm('table', 'data-table')
             const title = createElm('div', null, { marginLeft: '4px', marginTop: '4px', marginBottom: '2px' })
@@ -276,11 +329,27 @@ class ObjectView {
             this.container.appendChild(row)
         }
 
-        // Add object's references to the bottom of the field list
-        const refs = this.object.references.map(e => '<p>&nbsp;&nbsp;' + e.getDisplayName())
+        // Create list of object's references
+        this.createReferenceList()
+    }
+
+    /**
+     * Add object's references to the bottom of the field list
+     */
+    createReferenceList() {
         const div = createElm('div', 'ref-list')
-        div.innerHTML = `References: (${refs.length}) ` + refs.join('</p>') + '</p>'
+        div.innerText = `References: (${this.object.references.length}) `
         this.container.appendChild(div)
+
+        this.object.references.forEach(object => {
+            const p = createElm('p', 'object-references')
+            p.innerHTML = '&nbsp;&nbsp;⇒ ' + object.getDisplayName()
+            p.onclick = () => {
+                Main.objectView = new ObjectView(object)
+                Main.focusObject(object.index)
+            }
+            div.appendChild(p)
+        })
     }
 
     /**
@@ -290,20 +359,25 @@ class ObjectView {
         if (field.children) return
 
         const getMemoryInfos = (field) => {
+            const memSize  = this.object.view.readUInt(field.offset + igMemoryRefOffset)
             const bitfield = this.object.view.readUInt(field.offset + igMemoryRefOffset + 4)
 
             const mem = {
                 field,
-                memSize:     this.object.view.readUInt(field.offset + igMemoryRefOffset),
-                active:      ((bitfield >> 0x18) & 0x1) != 0x0,
-                dataOffset:  this.object.view.readUInt(field.offset + igMemoryRefOffset + 8),
+                memSize,
+                active: ((bitfield >> 0x18) & 0x1) != 0x0 && memSize > 0,
+                dataOffset: this.object.view.readUInt(field.offset + igMemoryRefOffset + 8),
                 elementSize: field.getTypeSize(field.memType),
             }
-            mem.elementCount   = mem.memSize / mem.elementSize
-            mem.object         = Main.igz.findObject(mem.dataOffset)
-            mem.startOffset    = Main.igz.getGlobalOffset(mem.dataOffset) - mem.object.global_offset
+            mem.elementCount = mem.memSize / mem.elementSize
             mem.field.children = []
             mem.field.collapsable = true
+
+            if (mem.active) {
+                mem.object      = Main.igz.findObject(mem.dataOffset)
+                mem.startOffset = Main.igz.getGlobalOffset(mem.dataOffset) - mem.object.global_offset
+            }
+
             return mem
         }
 

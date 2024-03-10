@@ -169,9 +169,9 @@ class LevelExplorer {
                 timeout = setTimeout(() => {
                     const object = this.transformControls.object
                     if (object) {
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[2], (-object.position.x).toFixed(3), 0)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[2], object.position.z.toFixed(3), 1)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[2], object.position.y.toFixed(3), 2)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], (-object.position.x).toFixed(3), 0)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object.position.z.toFixed(3), 1)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object.position.y.toFixed(3), 2)
                     }
                 }, 500)
             })
@@ -229,14 +229,10 @@ class LevelExplorer {
 
                         this.transformControls.attach(object)
 
-                        const node = Main.tree.available().find(e => e.type == 'object' && e.objectIndex == objectData.objectIndex)
-                        if (node) {
-                            node.expandParents()
-                            node.select()
-                            node.focus()
-                        }
                         const igObject = Main.igz.objects[objectData.objectIndex]
                         Main.objectView = new ObjectView(igObject)
+                        Main.focusObject(objectData.objectIndex)
+                        Main.hideStructView()
                     }
                     else {
                         this.transformControls.detach()
@@ -310,6 +306,7 @@ class LevelExplorer {
             ipcRenderer.send('set-progress-bar', i, modelFiles.length, title, `Reading file ${name}`, 'models loaded')
 
             const igz = IGZ.fromFileInfos(file)
+            igz.setupChildrenAndReferences()
             const modelData = extractModelData(igz)
             if (modelData == null) continue
             const { drawCalls } = modelData
@@ -353,6 +350,7 @@ class LevelExplorer {
             ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
 
             const igz = IGZ.fromFileInfos(file)
+            igz.setupChildrenAndReferences()
             
             const igEntities        = processObjects(igz, 'igEntity', this.process_igEntity)
             const CEntities         = processObjects(igz, 'CEntity', this.process_CEntity)

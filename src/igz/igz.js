@@ -31,6 +31,7 @@ class IGZ {
 
     /** Construct from .igz file path
      * @param {string} filePath path to the file
+     * @returns {IGZ} new IGZ object
     */
     static fromFile(filePath) {
         const data = readFileSync(filePath)
@@ -84,9 +85,6 @@ class IGZ {
         
         if (this.fixups.TMET == null) throw new Error('TMET fixup not found')
         if (this.fixups.RVTB == null) throw new Error('RVTB fixup not found')
-        if (this.fixups.TSTR == null) console.warn('TSTR fixup not found')
-        if (this.fixups.ROFS == null) console.warn('ROFS fixup not found')
-        if (this.fixups.ONAM == null) console.warn('ONAM fixup not found')
         if (this.fixups.TSTR == null || this.fixups.ROFS == null || this.fixups.ONAM == null) {
             return
         }
@@ -167,65 +165,6 @@ class IGZ {
             types_count[object.type] = count + 1
             object.typeCount = count
         })
-
-        /// Get children + references ///
-
-        for (const object of this.objects) {
-            const fields = { object: [], memory: [],  vector: [] }
-
-            TYPES_METADATA[object.type].forEach(e => {
-                if (e.type == 'igObjectRefMetaField') fields.object.push(e)
-                if (e.type == 'igMemoryRefMetaField') fields.memory.push(e)
-                if (e.type == 'igVectorMetaField') fields.vector.push(e)
-            })
-
-            const addChild = (offset, offsetROFS) => {
-                if (offset == 0 || !this.fixups.ROFS.data.includes(offsetROFS)) return
-
-                const child = this.findObject(offset)
-
-                if (child != null && child != object) {
-                    object.children.push({ object: child, offset: offsetROFS })
-                    child.references.push(object)
-                }
-            }
-
-            for (const ref of fields.object) {
-                const offset = object.view.readUInt(ref.offset)
-                addChild(offset, object.offset + ref.offset, ref.offset)
-            }
-
-            for (const ref of fields.memory.concat(fields.vector)) {
-                if (ref.memType != 'igObjectRefMetaField') continue
-
-                const offset = object.view.readUInt(ref.offset)
-                if (offset == 0) continue
-
-                const child = this.findObject(offset)
-
-                if (child != null) {
-                    const isMemoryRef = ref.type == 'igMemoryRefMetaField'
-                    const {data, offsets, dataOffset, active} = object.extractMemoryData(this, ref.offset + (isMemoryRef ? 0 : 8), 8)
-                    if (active)
-                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8, offsets[i]))
-                }
-            }
-        }
-
-        for (const object of this.objects.slice(1).filter(e => e.children.length == 0)) {
-            for (let i = 0; i < object.size; i += 4) {
-                const inROFS = this.fixups.ROFS.data.includes(object.offset + i)
-                if (!inROFS) continue
-
-                const offset = object.view.readUInt(i)
-                const child = this.findObject(offset)
-
-                if (child != null && child != object && child.nameID != -1 && child.references.length == 1) {
-                    object.children.push({ object: child, offset })
-                    child.references.push(object)
-                }
-            }
-        }
     }
 
     save(filePath) {
@@ -311,7 +250,7 @@ class IGZ {
     /**
      * Update the TSTR and chunk_info objects of this package file
      * Only call this function on *_pkg.igz files
-     * @param {string[]} file_paths List containing all paths of the oarent .pak archive
+     * @param {string[]} file_paths List containing all paths of the parent .pak archive
      * @returns New igz file buffer
      */
     updatePKG(file_paths) 
@@ -329,6 +268,8 @@ class IGZ {
 
         const filesByType = Object.fromEntries(typesOrder.map(e => [e, []]))
         const types = new Set()
+
+        this.setupChildrenAndReferences()
         
         file_paths = file_paths.sort((a, b) => a.localeCompare(b))
 
@@ -375,8 +316,10 @@ class IGZ {
             const prevEndOffset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
 
             if (object.offset != prevEndOffset) {
-                console.log('Updated start offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + (prevEndOffset - object.offset) + ')')
-                object.offset = prevEndOffset
+                const diff = prevEndOffset - object.offset
+                object.offset += diff
+                object.global_offset += diff
+                console.log('Updated start offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + diff + ')')
             }
         }
 
@@ -400,6 +343,100 @@ class IGZ {
     }
 
     /**
+     * Find children and references for all objects
+     */
+    setupChildrenAndReferences() {
+        const isInParent = (obj, child) => {
+            for (const ref of obj.references) {
+                if (ref == child || isInParent(ref, child)) return true
+            }
+            return false
+        }
+
+        for (const object of this.objects) {
+            object.children = []
+            object.references = []
+        }
+
+        if (this.fixups.ROFS == null) return
+
+        const rofs = this.fixups.ROFS.data
+        let currentROFS = 0
+
+        for (const object of this.objects) {
+            const fields = { object: [], memory: [],  vector: [] }
+
+            TYPES_METADATA[object.type].forEach(e => {
+                if (e.type == 'igObjectRefMetaField') fields.object.push(e)
+                if (e.type == 'igMemoryRefMetaField') fields.memory.push(e)
+                if (e.type == 'igVectorMetaField') fields.vector.push(e)
+            })
+
+            const addChild = (offset, offsetROFS) => {
+                while (rofs[currentROFS] < offsetROFS) {
+                    currentROFS++
+                }
+                const inROFS = rofs[currentROFS] == offsetROFS
+                if (offset == 0 || !inROFS) return
+
+                const child = this.findObject(offset)
+
+                if (child != null && child != object) {
+                    if (isInParent(object, child)) return
+                    object.children.push({ object: child, offset: offsetROFS })
+                    child.references.push(object)
+                }
+            }
+
+            for (const ref of fields.object) {
+                const offset = object.view.readUInt(ref.offset)
+                addChild(offset, object.offset + ref.offset)
+            }
+
+            for (const ref of fields.memory.concat(fields.vector)) {
+                if (ref.memType != 'igObjectRefMetaField') continue
+
+                const offset = object.view.readUInt(ref.offset)
+                if (offset == 0) continue
+
+                const child = this.findObject(offset)
+
+                if (child != null) {
+                    const isMemoryRef = ref.type == 'igMemoryRefMetaField'
+                    const {data, dataOffset, active} = object.extractMemoryData(this, ref.offset + (isMemoryRef ? 0 : 8), 8)
+                    if (active)
+                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8))
+                }
+            }
+        }
+
+        currentROFS = 0
+
+        for (let i = 1; i < this.objects.length; i++) {
+            const object = this.objects[i]
+            if (object.children.length > 0) continue
+
+            for (let i = 0; i < object.size; i += 4) {
+                while (rofs[currentROFS] < object.offset + i) {
+                    currentROFS++
+                }
+                
+                const inROFS = rofs[currentROFS] == object.offset + i
+                if (!inROFS) continue
+
+                const offset = object.view.readUInt(i)
+                const child = this.findObject(offset)
+
+                if (child != null && child != object && (child.references.length == 0 || child.references.length == 1 && child.references[0] == this.objectList)) {
+                    if (isInParent(object, child)) continue
+                    object.children.push({ object: child, offset })
+                    child.references.push(object)
+                }
+            }
+        }
+    }
+
+    /**
      * Finds the references to the external objects defined in the EXID fixup
      * 
      * @param {string} archives_folder - The path to the archives/ folder of the game
@@ -407,6 +444,8 @@ class IGZ {
      */
     setupEXID(archives_folder, pak) 
     {
+        this.setupChildrenAndReferences()
+
         if (!this.fixups.EXID) return
 
         const findFileInPAK   = (pak, file_hash)   => pak.files.find(e => computeHash(extractName(e.path)) == file_hash)
@@ -524,6 +563,7 @@ class IGZ {
     findObject(offset, global_offset = true) {
         if (global_offset) {
             offset = this.getGlobalOffset(offset)
+            if (offset == -1) return null
             return this.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
         }
         return this.objects.find(e => offset >= e.offset && offset < e.offset + e.size)
@@ -536,7 +576,12 @@ class IGZ {
      * @returns {int} The offset relative to the start of the file
      */
     getGlobalOffset(offset) {
-        return (offset & 0x7ffffff) + this.chunk_infos[(offset >> 0x1b) + 1].offset
+        const chunk_infos = this.chunk_infos[(offset >> 0x1b) + 1]
+        if (chunk_infos == null) {
+            console.warn('Chunk info not found for offset: ' + offset, (offset >> 0x1b) + 1)
+            return -1
+        }
+        return (offset & 0x7ffffff) + chunk_infos.offset
     }
 
     /**
@@ -548,6 +593,9 @@ class IGZ {
         return this.objects.filter(e => e.nameID != -1 && e.references.length == 1)
     }
 
+    /**
+     * Convert the IGZ file to a tree structure for UI display
+     */
     toNodeTree(recursive = true) {
         const unreferenced = this.objects.filter(e => e.references.length == 0)
         let root = this.getRootObjects()
@@ -556,6 +604,13 @@ class IGZ {
         if (this.objects.length > 0 && root.length == 0) {
             root = this.objects.filter(e => !unreferenced.includes(e))
             rootText = 'All Objects'
+        }
+
+        // Special display for VSC objects
+        const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
+        if (vscRoot) {
+            root = root.filter(e => e != vscRoot)
+            rootText = 'Other Objects'
         }
 
         // Group objects by type
@@ -590,6 +645,13 @@ class IGZ {
         }
         else if (unreferenced.length == 0) {
             root = [{text: 'No Objects'}]
+        }
+        
+        if (vscRoot) {
+            root = [
+                vscRoot.toNodeTree(recursive),
+                ...root
+            ]
         }
 
         const tree = [{

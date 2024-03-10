@@ -1,6 +1,7 @@
 import { bitRead, bitReplace, computeHash } from "../../utils"
 import { createElm } from "./utils/utils"
 import { ENUMS_METADATA, file_types, getAllInheritedChildren } from "./utils/metadata"
+import ObjectView from "./object_view"
 
 // Keep track of updated fields within objects
 const updated_data = {}
@@ -362,10 +363,21 @@ class ObjectField {
             const offset = this.object.view.readInt(this.offset)
             const refObject = offset > 0 ? Main.igz.findObject(offset) : null
             const inheritedClasses = getAllInheritedChildren(this.refType).add(this.refType)
-            const names = Main.igz.objects.filter(e => !this.refType || inheritedClasses.has(e.type)).map(e => e.getDisplayName())
+            let names = Main.igz.objects.filter(e => !this.refType || inheritedClasses.has(e.type)).map(e => e.getDisplayName())
+            
+            if (!names.includes(refObject?.getDisplayName()))
+                names = Main.igz.objects.map(e => e.getDisplayName())
+            
             input = this.createCustomListInput([names], refObject?.getDisplayName())
-            input.onchange = () => this.onChange(Main.igz.objects.find(e => e.getDisplayName() == input.value)?.offset ?? 0)
-            if (inROFS) this.typeElement.title += ` | ROFS`
+            input.onchange = () => {
+                const newObject = Main.igz.objects.find(e => e.getDisplayName() == input.value)
+                this.onChange(newObject?.offset ?? 0)
+                this.createFocusEvent(newObject)
+            }
+            if (inROFS) {
+                this.typeElement.title += ` | ROFS`
+                this.createFocusEvent(refObject)
+            }
         }
 
         // TODO: Entry should be added to the corresponding fixup if it's not there
@@ -389,6 +401,13 @@ class ObjectField {
         const decodeIndex = (index) => {
             const fixup = index & 0x80000000 ? 'EXNM' : 'EXID'
             const nameIndex = names.findIndex(e => e.type == fixup && e.id == (index & 0x3FFFFFFF))
+
+            // Create focus event for EXNM handles inside the same igz file
+            if (names[nameIndex].type == 'EXNM') {
+                const object = Main.igz.objects.find(e => e.name == names[nameIndex].name)
+                if (object != null) this.createFocusEvent(object)
+            }
+
             return short_names[nameIndex]
         }
 
@@ -398,7 +417,13 @@ class ObjectField {
             if (name_id == -1) return 0
 
             let fixup_id = names[name_id].id
-            if (names[name_id].type === 'EXNM') fixup_id |= 0x80000000
+            if (names[name_id].type === 'EXNM') {
+                fixup_id |= 0x80000000
+                
+                // Create focus event for EXNM handles inside the same igz file
+                const object = Main.igz.objects.find(e => e.name == names[name_id].name)
+                if (object != null) this.createFocusEvent(object)
+            }
             return fixup_id
         }
 
@@ -461,6 +486,20 @@ class ObjectField {
             refCell.element.scrollIntoViewIfNeeded()
         }
         else console.warn('Memory reference not found:', this.name)
+    }
+
+    createFocusEvent(object) {
+        if (object == null) return
+
+        const focus = () => {
+            Main.objectView = new ObjectView(object)
+            Main.focusObject(object.index)
+        }
+
+        this.typeElement.onclick = focus
+        this.typeElement.style.cursor = 'pointer'
+        this.typeElement.innerText = this.typeElement.innerText.replace(' ⇒', '') + ' ⇒'
+        this.typeElement.classList.add('object-references')
     }
 
     updateObject(object, value, update_input = false, id = 0) {

@@ -346,11 +346,22 @@ td.hex-flash {
 
 .ref-list {
   margin: 10px 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .ref-list p {
   font-weight: 100;
   margin: 2px;
+}
+
+.object-references {
+  cursor: pointer;
+}
+
+.object-references:hover {
+  font-weight: bold;
+  font-style: italic;
 }
 
 /* Data Type Viewer */

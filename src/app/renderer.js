@@ -148,6 +148,16 @@ class Main {
         })
     }
 
+    // Focus an object in the main IGZ tree view
+    static focusObject(objectIndex) {
+        const node = tree.available().find(e => e.type == 'object' && e.objectIndex === objectIndex)
+        if (node) {
+            node.expandParents()
+            node.focus()
+            node.select()
+        }
+    }
+
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree() {
         const defaultColor = '#fefefe'
@@ -201,7 +211,7 @@ class Main {
         this.igz = igz
         
         treePreview.load(igz.toNodeTree(false))
-        treePreview.get(2)?.expand()
+        if (treePreview.nodes().length == 3) treePreview.get(1).expand()
     }
 
     // Hide IGZ content preview
@@ -255,7 +265,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.15 - '
+        const title = 'The Apprentice v1.16 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -332,6 +342,7 @@ function onNodeClick(event, node)
 
             if ((file.path.startsWith('actors/') || file.path.startsWith('models/')) && file.path.endsWith('.igz')) {
                 const igz = IGZ.fromFileInfos(file)
+                igz.setupChildrenAndReferences()
                 Main.levelExplorer.showModel(igz)
             }
 
@@ -793,7 +804,7 @@ function toggleEndian(bigEndian) {
  */
 async function main() 
 {
-    // Create preiew tree (right)
+    // Create preview tree (right)
     treePreview = Main.createTree('.tree-preview', { 
         data: onNodeLoadChildren 
     })
@@ -815,7 +826,7 @@ async function main()
     // Main tree nodes click event
     tree.on('node.click', onNodeClick)
     tree.on('node.dblclick', (event, node) => {
-        if (node.type === 'file') {
+        if (node.type === 'file' && node.text.endsWith('.igz')) {
             Main.lastFileIndex = node.fileIndex
             Main.showIGZTree() // Open IGZ from PAK on double click
         }
@@ -930,8 +941,11 @@ async function main()
             Main.setNodeToUpdated(node)
             node.select()
 
-            if (Main.levelExplorer.mode == 'model' && Main.levelExplorer.visible) 
-                Main.levelExplorer.showModel(IGZ.fromFileInfos(pak.files[fileIndex]))
+            if (Main.levelExplorer.mode == 'model' && Main.levelExplorer.visible) {
+                const modelIGZ = IGZ.fromFileInfos(pak.files[fileIndex])
+                modelIGZ.setupChildrenAndReferences()
+                Main.levelExplorer.showModel(modelIGZ)
+            }
 
             console.log('Replaced', pak.files[fileIndex], pak.files[newFileIndex])
         }
@@ -982,7 +996,7 @@ async function main()
         const defaultGameFolder = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Crash Bandicoot - N Sane Trilogy\\'
         if (existsSync(defaultGameFolder)) {
             localStorage.setItem('game_folder', defaultGameFolder)
-            await backupGameFolder()
+            if (!existsSync(getBackupFolder())) await backupGameFolder()
         }
     }
     

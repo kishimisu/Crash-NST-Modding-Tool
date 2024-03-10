@@ -100,8 +100,10 @@ Relative calculation works with multi-editing and will affect each object's rela
 #### Interesting properties
 When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. These properties will be colored in red. All properties in white have the same value for all other objects of the same type.
 
-#### Special properties types
-`Memory Ref`: If you click on properties of type `Memory Ref` (which contains a list of elements), the cell containing the actual data will be focused. If the data is located in another object, this object will be opened. The same is possible for `Raw Ref` types.
+#### Jump to objects (⇒)
+- If properties of type `Object Ref` or `Handle` are referencing an object within the current .igz file, you can click on their name to focus/jump to the referenced object.
+
+- Likewise, the references (parents) of objects are listed at the bottom of every object view. You can click on any of their name to focus/jump to the corresponding parent object.
 
 #### Additional infos
 Depending on their type, detailed informations are available when hovering the name and type of properties.

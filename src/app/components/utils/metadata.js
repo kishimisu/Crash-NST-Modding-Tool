@@ -5,7 +5,7 @@ import { BufferView } from '../../../utils'
 /**
  * Reads all types metadata, enums metadata and types hierarchy from the metadata file.
  */
-const [TYPES_METADATA, ENUMS_METADATA, TYPES_HIERARCHY] = extract_metadata()
+const [TYPES_METADATA, ENUMS_METADATA, TYPES_HIERARCHY, TYPES_SIZES] = extract_metadata()
 
 const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
 
@@ -17,6 +17,7 @@ function extract_metadata() {
     const objects = {}
     const enums = {}
     const hierarchy = {}
+    const typeSizes = {}
 
     const namesCount = view.readUInt16()
 
@@ -52,8 +53,8 @@ function extract_metadata() {
             name: 'referenceCount',
             type: 'igUnsignedIntMetaField',
             offset: 8,
-            size: 8,
-            typeSize: 4,
+            size: 4,
+            alignment: 4,
         }]
 
         // Add type to hierarchy data
@@ -72,7 +73,7 @@ function extract_metadata() {
                 type: names[view.readUInt16()],
                 offset: view.readUInt16(),
                 size: view.readUInt16(),
-                typeSize: view.readUInt16(),
+                alignment: view.readUInt16(),
                 static: view.readByte() === 1
             }
             
@@ -120,6 +121,19 @@ function extract_metadata() {
                     field.enumType = null
                 }
             }
+
+            // Add type size and alignment data
+            if (!field.bitfield && !field.bitfieldParent &&  
+                !field.type.includes('Array') && 
+                 field.type != 'igStructMetaField') {
+
+                if (typeSizes[field.type] == null) 
+                    typeSizes[field.type] = {
+                        size: field.size,
+                        alignment: field.alignment
+                    }
+                // else if (typeSizes[field.type].alignment != field.alignment) console.warn('Alignment mismatch', field.name, field.type, field.alignment, typeSizes[field.type].alignment)
+            }
         })
 
         // Remove 0-sized fields, sort by offset and save type metadata
@@ -130,7 +144,7 @@ function extract_metadata() {
 
     console.log('Extracted metadata in ', (performance.now() - start).toFixed(3), 'ms')
 
-    return [ objects, enums, hierarchy ]
+    return [ objects, enums, hierarchy, typeSizes ]
 }
 
 /**
@@ -151,6 +165,7 @@ function getAllInheritedChildren(type, all_children = new Set()) {
 
 export {
     TYPES_METADATA,
+    TYPES_SIZES,
     ENUMS_METADATA,
     namespace_hashes,
     file_types,

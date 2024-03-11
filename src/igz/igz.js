@@ -343,7 +343,8 @@ class IGZ {
     }
 
     /**
-     * Find children and references for all objects
+     * Find children and references for all objects using fields of type
+     * igObjectRef, igMemoryRef and igVector that appear in ROFS
      */
     setupChildrenAndReferences() {
         const isInParent = (obj, child) => {
@@ -360,9 +361,19 @@ class IGZ {
 
         if (this.fixups.ROFS == null) return
 
+        // As ROFS is in increasing order, we can keep track of the last highest
+        // offset instead of looping through all ROFS elements for all objects
+        let rofsIndex = 0
         const rofs = this.fixups.ROFS.data
-        let currentROFS = 0
+        const currentROFS = () => this.getGlobalOffset(rofs[rofsIndex])
+        const checkROFS   = (offset) => {
+            while (currentROFS() < offset && rofsIndex < rofs.length - 1) {
+                rofsIndex++
+            }
+            return currentROFS() == offset
+        }
 
+        // First pass: use metadata to find children
         for (const object of this.objects) {
             const fields = { object: [], memory: [],  vector: [] }
 
@@ -373,26 +384,24 @@ class IGZ {
             })
 
             const addChild = (offset, offsetROFS) => {
-                while (rofs[currentROFS] < offsetROFS) {
-                    currentROFS++
-                }
-                const inROFS = rofs[currentROFS] == offsetROFS
-                if (offset == 0 || !inROFS) return
+                if (offset == 0 || !checkROFS(offsetROFS)) return
 
                 const child = this.findObject(offset)
 
                 if (child != null && child != object) {
                     if (isInParent(object, child)) return
-                    object.children.push({ object: child, offset: offsetROFS })
+                    object.children.push({ object: child, offset: offsetROFS - object.global_offset })
                     child.references.push(object)
                 }
             }
 
+            // Add igObjectRefs
             for (const ref of fields.object) {
                 const offset = object.view.readUInt(ref.offset)
-                addChild(offset, object.offset + ref.offset)
+                addChild(offset, object.global_offset + ref.offset)
             }
 
+            // Add igMemoryRefs and igVectors
             for (const ref of fields.memory.concat(fields.vector)) {
                 if (ref.memType != 'igObjectRefMetaField') continue
 
@@ -410,26 +419,24 @@ class IGZ {
             }
         }
 
-        currentROFS = 0
+        rofsIndex = 0
 
+        // Second pass: loop through objects bytes to find remaining children
+        // (Not correct, but allow to find children for dynamic objects not present in the metadata, ie. CVscComponentData)
         for (let i = 1; i < this.objects.length; i++) {
             const object = this.objects[i]
             if (object.children.length > 0) continue
 
             for (let i = 0; i < object.size; i += 4) {
-                while (rofs[currentROFS] < object.offset + i) {
-                    currentROFS++
-                }
-                
-                const inROFS = rofs[currentROFS] == object.offset + i
-                if (!inROFS) continue
+                const offsetROFS = object.global_offset + i
+                if (!checkROFS(offsetROFS)) continue
 
                 const offset = object.view.readUInt(i)
                 const child = this.findObject(offset)
 
                 if (child != null && child != object && (child.references.length == 0 || child.references.length == 1 && child.references[0] == this.objectList)) {
                     if (isInParent(object, child)) continue
-                    object.children.push({ object: child, offset })
+                    object.children.push({ object: child, offset: i })
                     child.references.push(object)
                 }
             }

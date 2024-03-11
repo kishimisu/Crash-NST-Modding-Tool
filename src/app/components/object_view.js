@@ -102,14 +102,14 @@ class ObjectView {
 
                     // Extract enum option names and values from igVectors
                     if (field.type == 'igEnumMetaField') {
-                        if (field.children.length == 1) {
-                            const enumObject = field.children[0].object
-                            const names  = enumObject.extractMemoryData(igz, 0x20+8, 8).data.map(e => igz.fixups.TSTR.data[e])
-                            const values = enumObject.extractMemoryData(igz, 0x38+8, 4).data
+                        const ifVscEnum = field.tryGetChild('igVscEnum')
+                        if (ifVscEnum != null) {
+                            const names  = ifVscEnum.extractMemoryData(igz, 0x20+8, 8).data.map(e => igz.fixups.TSTR.data[e])
+                            const values = ifVscEnum.extractMemoryData(igz, 0x38+8, 4).data
                             ENUMS_METADATA[newField.name] = new Array(names.length).fill(0).map((e, i) => ({ name: names[i], value: values[i] }))
                             newField.enumType = newField.name
                         }
-                        else console.warn('igEnumMetaField children count mismatch (!= 1)', field.children.length)
+                        else console.warn('igVscEnum not found')
                     }
 
                     currentOffset = offset + size
@@ -287,16 +287,6 @@ class ObjectView {
                 }
             }
         }
-
-        // Colorize unassigned cells that have a value
-        const lastField = this.fields.reduce((a, b) => a.offset + a.size > b.offset + b.size ? a : b)
-        let lastOffset = lastField.offset + lastField.size
-        if (lastOffset % 4 != 0) lastOffset += 4 - (lastOffset % 4)
-        for (let i = lastOffset/4; i < this.hexCells.length; i++) {
-            const cell = this.hexCells[i].element
-            const value = this.object.view.readUInt(i*4)
-            if (value != 0 && value != 0xFAFAFAFA) cell.classList.remove('hex-zero')
-        }
     }
 
     /**
@@ -418,16 +408,25 @@ class ObjectView {
 
         if (keys && keys.elementCount != values.elementCount) console.warn('Value and keys count mismatch:', values.elementCount, keys.elementCount)
 
+        // Hex view was originally made for displaying 4 continuous bytes at a time, but dictionaries keys and values 
+        // are not always continuous, which is problematic when the element size is less than 4 bytes
+        if (keys && Math.min(keys.elementSize, values.elementSize) < 4) 
+            console.warn('Dictionary values element size < 4, data may be wrong in hex view', keys.field.memType, values.field.memType)
+
         // Add elements to the list(s)
         if (field.memType != 'void' && values.active)
             for (let k = 0, index = 0; k < values.elementCount; k++) {
                 if (keys) {
                     const keyOffset = keys.startOffset + k * keys.elementSize
-                    const key = keys.object.view.readInt(keyOffset)
+                    const method = keyField.getIntegerMethod(keys.field.memType)?.replace('Long', 'Int') ?? 'Int'
+                    const key = keys.object.view['read' + method](keyOffset)
 
                     // Skip invalid keys
-                    // TODO: Should include fixup lookup
-                    if (keys.field.isIntegerType(keys.field.memType) && key >>> 0 == 0xFAFAFAFA) continue
+                    // TODO: Include missing types fixup lookup
+                    if (keys.field.isStringType(keys.field.memType)) {
+                        if (!Main.igz.fixups.RSTT?.data.includes(keys.object.offset + keyOffset)) continue
+                    }
+                    else if (keys.field.isIntegerType(keys.field.memType) && key >>> 0 == 0xFAFAFAFA) continue
                     else if (key == 0) continue
 
                     addMemoryElement(keys, index, keyOffset) // Add key

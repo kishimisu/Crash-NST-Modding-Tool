@@ -447,7 +447,7 @@ class ObjectField {
         else {
             if (this.memType == 'void') {
                 cell.innerText = this.memory_active
-                    ? `Type: void | Size: ${this.memory_size}`
+                    ? `Raw bytes | Size: ${this.memory_size}`
                     : 'Inactive'
             }
             else if (this.memory_active)
@@ -676,7 +676,7 @@ class ObjectField {
         return size ?? 8
     }
 
-    getIntegerMethod() {
+    getIntegerMethod(type) {
         return {
             'igLongMetaField':          'Long',
             'igUnsignedLongMetaField':  'ULong',
@@ -688,7 +688,7 @@ class ObjectField {
             'igUnsignedCharMetaField':  'UInt8',
             'igEnumMetaField':          'Int',
             'igBoolMetaField':          'UInt8',
-        }[this.type]
+        }[type ?? this.type]
     }
 
     isIntegerType(type) {
@@ -725,11 +725,11 @@ class ObjectField {
         ].includes(this.type)
     }
 
-    isStringType() {
+    isStringType(type) {
         return [
             'igStringMetaField',
             'igNameMetaField',
-        ].includes(this.type)
+        ].includes(type ?? this.type)
     }
 
     isMemoryType() {

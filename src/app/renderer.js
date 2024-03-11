@@ -190,16 +190,27 @@ class Main {
     }
 
     // Show IGZ content preview in PAK tree
-    static showIGZPreview(fileIndex) {        
+    static showIGZPreview(fileIndex, forceReload = false) {        
         elm('#data-struct').style.overflow = 'visible'
         elm('#igz-open').style.display = 'block'
+        let showProgress = false
 
         try {
-            igz = IGZ.fromFileInfos(pak.files[fileIndex])
-            igz.setupEXID(getArchiveFolder(), pak)
+            if (forceReload || igz == null || igz.path !== pak.files[fileIndex].path) {
+                const filePath = pak.files[fileIndex].path
+
+                if (pak.files[fileIndex].size > (filePath.startsWith('maps/') ? 1_000_000 : 2_400_000)) showProgress = true
+                if (showProgress) ipcRenderer.send('set-progress-bar', 1, null, 'Loading', 'Loading...', 'Loading ' + filePath.split('/').pop())
+                
+                igz = IGZ.fromFileInfos(pak.files[fileIndex])
+                igz.setupEXID(getArchiveFolder(), pak)
+
+                if (showProgress) ipcRenderer.send('set-progress-bar', null)
+            }
         }
         catch (e) {
             igz = null
+            if (showProgress) ipcRenderer.send('set-progress-bar', null)
             treePreview.load([{ 
                 text: 'There was an error loading this file.',
                 children: [{ text: e.message }],
@@ -224,9 +235,10 @@ class Main {
 
     static initLevelExplorer() {
         if (Main.pak == null) return ipcRenderer.send('show-warning-message', 'This feature is only available in .pak files.')
+        if (Main.pak.files.find(e => e.path.startsWith('maps/')) == null) return ipcRenderer.send('show-warning-message', 'Cannot open Level Explorer for non-level files.')
         
         try {
-            if (pak == this.levelExplorer.pak && this.levelExplorer.mode == 'level')
+            if (pak == this.levelExplorer.pak && this.levelExplorer.mode == 'level' && !this.levelExplorer.visible)
                 return this.levelExplorer.toggleVisibility(true)
             this.levelExplorer.init()
         } catch (e) {
@@ -265,7 +277,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.16 - '
+        const title = 'The Apprentice v1.17 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -748,7 +760,7 @@ async function backupGameFolder(restore = false) {
     const ok = await ipcRenderer.invoke('show-confirm-message', messages.confirm[restore])
     if (!ok) return
 
-    const files = readdirSync(getArchiveFolder())
+    const files = readdirSync(restore ? getBackupFolder() : getArchiveFolder())
 
     try {
         for (let i = 0; i < files.length; i++) {
@@ -935,7 +947,7 @@ async function main()
             pak.replaceFileWithinPak(fileIndex, newFileIndex)
 
             Main.setSyntaxHighlightedCode(pak.files[fileIndex])
-            Main.showIGZPreview(fileIndex)
+            Main.showIGZPreview(fileIndex, true)
 
             const node = tree.lastSelectedNode()
             Main.setNodeToUpdated(node)

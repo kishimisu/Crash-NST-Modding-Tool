@@ -210,8 +210,6 @@ class LevelExplorer {
                         lastObject = object
                         lastColor = object.children?.length > 0 ? object.children[0].material.color.clone() : object.material.color.clone()
 
-                        object.children?.forEach(e => e.material.color.set(0xeda93b))
-
                         const objectData = object.userData
                         
                         if (!Main.igz || Main.treeMode == 'pak' || Main.igz.path != objectData.igz) {
@@ -219,14 +217,29 @@ class LevelExplorer {
                             if (!confirm) return
                             const fileIndex = Main.pak.files.findIndex(e => e.path == objectData.igz)
                             const fileInfos = Main.pak.files[fileIndex]
-                            Main.setIGZ(IGZ.fromFileInfos(fileInfos))
-                            Main.igz.setupEXID(getArchiveFolder(), Main.pak)
+                            const filePath  = fileInfos.path
+
+                            const showProgress = fileInfos.size > (filePath.startsWith('maps/') ? 1_000_000 : 2_400_000)
+                            if (showProgress) ipcRenderer.send('set-progress-bar', 1, null, 'Loading', 'Loading...', 'Loading ' + filePath.split('/').pop())
+                            
+                            try {
+                                Main.setIGZ(IGZ.fromFileInfos(fileInfos))
+                                Main.igz.setupEXID(getArchiveFolder(), Main.pak)
+                            }
+                            catch (e) {
+                                console.error(e)
+                                ipcRenderer.send('show-error-message', 'An error occurred while loading the file', e.message)
+                                return
+                            }
+                            finally {
+                                if (showProgress) ipcRenderer.send('set-progress-bar', null)
+                            }
+
                             Main.showIGZTree()
                             Main.lastFileIndex = fileIndex
                         }
 
-                        console.log(objectData)
-
+                        object.children?.forEach(e => e.material.color.set(0xeda93b))
                         this.transformControls.attach(object)
 
                         const igObject = Main.igz.objects[objectData.objectIndex]
@@ -398,7 +411,8 @@ class LevelExplorer {
             }
         }
 
-        processNextFile()
+        if (mapFiles.length > 0)
+            processNextFile()
     }
 
     process_igEntity(igz, object) 
@@ -501,6 +515,10 @@ class LevelExplorer {
         geometry.setIndex(indices)
     
         const mesh = new Mesh(geometry, material)
+        const prevent_z_fighting = Math.random() * .2 - .1
+        mesh.translateX(prevent_z_fighting)
+        mesh.translateY(prevent_z_fighting)
+        mesh.translateZ(prevent_z_fighting)
         return mesh
     }
 
@@ -555,7 +573,8 @@ class LevelExplorer {
         })
 
         // Set position
-        model.position.set(...position)
+        const prevent_z_fighting = Math.random() * .5 - .25
+        model.position.set(...position.map(e => e + prevent_z_fighting))
 
         // Set rotation
         if (rotation) {
@@ -563,7 +582,6 @@ class LevelExplorer {
             model.rotateZ(rotation[2])
             model.rotateX(rotation[0])
         }
-        //model.rotateY(-Math.PI/2)
 
         // Set scale
         if (scale)

@@ -107,5 +107,5 @@ igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
         offsets.push(offset)
     }
 
-    return {data, offsets, dataOffset: object.offset + startOffset, active}
+    return {data, offsets, dataOffset: object.global_offset + startOffset, active}
 }

@@ -322,7 +322,7 @@ function showSaveFileDialog(event, extension = 'pak') {
  * Creates a new progress bar if it doesn't exist.
  * 
  * @param {*} current_file Number of files processed so far
- * @param {*} file_count Total files to processed
+ * @param {*} file_count Total files to process. If null, the progress bar will be indeterminate
  */
 function setProgressBar(event, current_file, file_count, title, detail, text = "files written") {   
     // reset progress bar
@@ -335,13 +335,15 @@ function setProgressBar(event, current_file, file_count, title, detail, text = "
         return
     }
 
+    const isLoadingBar = file_count == null
+
     // create progress bar
     if (progressBar == null) {
         progressBar = new ProgressBar({
             title,
             detail,
             maxValue: 1,
-            indeterminate: false,
+            indeterminate: isLoadingBar,
             browserWindow: {
                 parent: win,
                 closable: current_file == null,
@@ -350,9 +352,9 @@ function setProgressBar(event, current_file, file_count, title, detail, text = "
         // progressBar.on('aborted', function() {});
     }
 
-    const progress = (current_file + 1) / file_count
-    progressBar.value = progress
-    progressBar.text = `${current_file} / ${file_count} ${text}. (${(progress * 100).toFixed(2)}%)`
+    const progress = isLoadingBar ? 0 : (current_file + 1) / file_count
+    if (!isLoadingBar) progressBar.value = progress
+    progressBar.text = isLoadingBar ? text : `${current_file} / ${file_count} ${text}. (${(progress * 100).toFixed(2)}%)`
     progressBar.detail = detail
 
     if (progress == 1) {

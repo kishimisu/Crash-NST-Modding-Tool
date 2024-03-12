@@ -191,11 +191,12 @@ class Main {
             // IGZ object node
             else if (e.type === 'object') {
                 const object = igz.objects[e.objectIndex]
-                const elm = e.itree.ref.querySelector('.title')
+                const title = e.itree.ref.querySelector('.title')
+                const typeColor = randomColor(object.type)
 
-                if (elm.children.length == 0) {
+                if (title.children.length == 0) {
                     const div = createElm('div', 'object-node-name')
-                    const typeElm = createElm('span', null, { color: randomColor(object.type) })
+                    const typeElm = createElm('span')
                     const nameElm = createElm('span')
                     const sep = e.text.indexOf(':')
                     let type = e.text, name = ''
@@ -208,16 +209,21 @@ class Main {
                     typeElm.innerText = type
                     nameElm.innerText = name
 
-                    elm.innerHTML = ''
-                    elm.appendChild(div)
+                    title.innerHTML = ''
+                    title.appendChild(div)
                     div.appendChild(typeElm)
                     if (name != '') div.appendChild(nameElm)
                 }
 
-                if (object.updated)
-                    elm.style.color = '#ffaf36'
-                else
-                    elm.style.color = ''
+                const children = e.itree.ref.querySelector('.object-node-name').children
+                if (object.updated) {
+                    children[0].style.color = '#ffaf36'
+                    if (children[1]) children[1].style.color = '#ffaf36'
+                }
+                else {
+                    children[0].style.color = typeColor
+                    if (children[1]) children[1].style.color = ''
+                }
             }
         })
     }
@@ -251,7 +257,7 @@ class Main {
         let showProgress = false
 
         try {
-            if (forceReload || igz == null || igz.path !== pak.files[fileIndex].path) {
+            if (forceReload || igz == null || igz.updated || igz.path !== pak.files[fileIndex].path) {
                 const filePath = pak.files[fileIndex].path
 
                 if (pak.files[fileIndex].size > (filePath.startsWith('maps/') ? 1_000_000 : 2_400_000)) showProgress = true
@@ -347,7 +353,8 @@ class Main {
 
     // Remove or add trailing '*' to the node name in the IGZ tree
     static setNodeUpdatedStateIGZ(node, updated) {
-        const nameElm = node.itree.ref.querySelector('.object-node-name').children[1]
+        const children = node.itree.ref.querySelector('.object-node-name').children
+        const nameElm = children[1] ?? children[0]
 
         if (!updated && node.text.endsWith('*')) {
             node.set('text', node.text.slice(0, -1))

@@ -83,13 +83,6 @@ class Pak {
             this.files.push(file)
         }
 
-        /// Read Block Tables ///
-
-        reader.seek(HEADER_SIZE + file_count * 20)
-        for (let i = 0; i < num_large_blocks; i++)  this.block_tables.large.push(reader.readUInt())
-        for (let i = 0; i < num_medium_blocks; i++) this.block_tables.medium.push(reader.readUInt16())
-        for (let i = 0; i < num_small_blocks; i++)  this.block_tables.small.push(reader.readUInt8())
-
         /// Read custom data ///
 
         if (reader.offset + 8 < buffer.byteLength) {
@@ -100,6 +93,13 @@ class Pak {
                 console.log('Custom file detected !')
             }
         }
+
+        /// Read Block Tables ///
+
+        reader.seek(HEADER_SIZE + file_count * 20)
+        for (let i = 0; i < num_large_blocks; i++)  this.block_tables.large.push(reader.readUInt())
+        for (let i = 0; i < num_medium_blocks; i++) this.block_tables.medium.push(reader.readUInt16())
+        for (let i = 0; i < num_small_blocks; i++)  this.block_tables.small.push(reader.readUInt8())
 
         // Read package file ///
         

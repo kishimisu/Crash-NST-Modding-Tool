@@ -601,7 +601,7 @@ class IGZ {
     getGlobalOffset(offset) {
         const chunk_infos = this.chunk_infos[(offset >> 0x1b) + 1]
         if (chunk_infos == null) {
-            console.warn('Chunk info not found for offset: ' + offset, (offset >> 0x1b) + 1)
+            // console.warn('Chunk info not found for offset: ' + offset, (offset >> 0x1b) + 1)
             return -1
         }
         return (offset & 0x7ffffff) + chunk_infos.offset

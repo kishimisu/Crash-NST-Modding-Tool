@@ -138,7 +138,7 @@ class igObject {
         }
     }
 
-    toNodeTree(recursive = true, parentObjects = []) {
+    toNodeTree(recursive = true, parentObjects = [], parentName = null) {
         if (parentObjects.includes(this.index)) {
             return { 
                 text: '[Recursion] ' + this.getName(), 
@@ -146,16 +146,27 @@ class igObject {
         }
         parentObjects.push(this.index)
 
+        let text = this.getName()
         let children = this.children.length > 0
 
-        if (children && recursive) {
-            children = this.index == 0 ? null : this.children.map(e => e.object.toNodeTree(true, parentObjects.slice()))
+        if (children && recursive)  // Load children
+            children = this.index == 0 ? null : this.children.map(e => e.object.toNodeTree(true, parentObjects.slice(), this.name))
+
+        // Shorten name if it starts with parent name
+        if (parentName && parentName != '' && this.nameID != -1) {
+            const type = text.slice(0, text.indexOf(':') + 2)
+            const name = text.slice(text.indexOf(':') + 2)
+            if (parentName.endsWith('_gen')) parentName = parentName.slice(0, -4)
+            if (name.startsWith(parentName)) {
+                text = type + name.slice(parentName.length)
+                if (text.endsWith('_gen')) text = text.slice(0, -4)
+            }
         }
 
         return {
             type: 'object',
             objectIndex: this.index,
-            text: this.getName(),
+            text,
             children
         }
     }

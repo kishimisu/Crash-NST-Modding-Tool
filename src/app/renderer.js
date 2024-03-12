@@ -13,7 +13,8 @@ import ObjectView from './components/object_view.js'
 import LevelExplorer from './components/level_explorer.js'
 import { clearUpdatedData } from './components/object_field.js'
 import { init_file_import_modal } from './components/import_modal.js'
-import { elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
+import { createElm, elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
+import { randomColor } from '../utils.js'
 import './components/utils/igObjectExtension.js'
 
 import levels from '../../assets/crash/levels.txt'
@@ -159,10 +160,10 @@ class Main {
     }
 
     // Apply colors to tree nodes depending on their updated status
-    static colorizeMainTree() {
+    static colorizeMainTree(tree_ = tree) {
         const defaultColor = '#fefefe'
 
-        tree.available().forEach(e => {
+        tree_.available().forEach(e => {
             // PAK file node
             if (e.type === 'file') {
                 const file = pak.files[e.fileIndex]
@@ -179,14 +180,66 @@ class Main {
             else if (e.type === 'folder') {
                 e.itree.ref.childNodes[0].style.color = e.updated ? '#ffaf36' : defaultColor
             }
+            // IGZ folder (grouped by type)
+            else if (e.type == 'type-group') {
+                const end = e.text.indexOf(' ')
+                const type = end == -1 ? e.text : e.text.slice(0, end)
+                e.itree.ref.querySelector('.title').style.color = randomColor(type)
+            }
             // IGZ object node
             else if (e.type === 'object') {
-                if (igz.objects[e.objectIndex].updated)
-                    e.itree.ref.style.color = '#ffaf36'
+                const object = igz.objects[e.objectIndex]
+                const elm = e.itree.ref.querySelector('.title')
+
+                if (elm.children.length == 0) {
+                    const div = createElm('div', 'object-node-name')
+                    const typeElm = createElm('span', null, { color: randomColor(object.type) })
+                    const nameElm = createElm('span')
+                    const sep = e.text.indexOf(':')
+                    let type = e.text, name = ''
+
+                    if (sep != -1) {
+                        type = e.text.slice(0, sep+1)
+                        name = e.text.slice(sep+1)
+                    }
+
+                    typeElm.innerText = type
+                    nameElm.innerText = name
+
+                    elm.innerHTML = ''
+                    elm.appendChild(div)
+                    div.appendChild(typeElm)
+                    if (name != '') div.appendChild(nameElm)
+                }
+
+                if (object.updated)
+                    elm.style.color = '#ffaf36'
                 else
-                    e.itree.ref.style.color = defaultColor
+                    elm.style.color = ''
             }
         })
+    }
+    
+    // Update the size of the tree view elements
+    static applyTreeStyle() {
+        const stylesheet  = Array.from(document.styleSheets[1].cssRules)
+        const getRule     = (selector) => stylesheet.find(e => e.selectorText == selector)
+        const updateStyle = (selector, style) => Object.assign(getRule(selector).style, style)
+
+        let height   = parseInt(localStorage.getItem('tree-size') ?? 18)
+        let fontSize = height * 0.04
+        
+        height   += 'px'
+        fontSize += 'rem'
+
+        elm('.tree').style.fontSize = fontSize
+        elm('.tree-preview').style.fontSize = fontSize
+        updateStyle('.inspire-tree .btn-group', { height, lineHeight: height })
+        updateStyle('.inspire-tree li > .title-wrap', { minHeight: height })
+        updateStyle('.inspire-tree .toggle', { height })
+        updateStyle('.inspire-tree .title', { height, lineHeight: height })
+        updateStyle('.inspire-tree .editable form', { height, lineHeight: height })
+        updateStyle('.inspire-tree .wholerow', { height, marginTop: '-'+height })
     }
 
     // Show IGZ content preview in PAK tree
@@ -222,6 +275,7 @@ class Main {
         this.igz = igz
         
         treePreview.load(igz.toNodeTree(false))
+        this.colorizeMainTree(treePreview)
         if (treePreview.nodes().length == 3) treePreview.get(1).expand()
     }
 
@@ -288,16 +342,30 @@ class Main {
         }
     }
 
-    // Remove all trailing '*' from tree node names
-    static clearAllNodesUpdatedState() {
-        tree.available().each(e => {
-            if (e.text.endsWith('*')) {
-                e.set('text', e.text.slice(0, -1))
-            }
-        })
-        Main.colorizeMainTree()
+    // Remove or add trailing '*' to the node name in the IGZ tree
+    static setNodeUpdatedStateIGZ(node, updated) {
+        const nameElm = node.itree.ref.querySelector('.object-node-name').children[1]
+
+        if (!updated && node.text.endsWith('*')) {
+            node.set('text', node.text.slice(0, -1))
+            nameElm.innerText = nameElm.innerText.slice(0, -1)
+        }
+        else if (updated && !node.text.endsWith('*')) {
+            node.set('text', node.text + '*')
+            nameElm.innerText += '*'
+        }
     }
 
+    // Remove all trailing '*' from IGZ object node names
+    static clearAllNodesUpdatedStateIGZ() {
+        tree.available().each(e => {
+            if (e.type == 'object')
+                this.setNodeUpdatedStateIGZ(e, false)
+        })
+        this.colorizeMainTree()
+    }
+
+    // Set a node name to updated in the PAK tree
     static setNodeToUpdated(node, newName) {
         if (!node.text.endsWith('*')) {
             node.set('text', (newName ?? node.text) + '*')
@@ -343,12 +411,13 @@ function onNodeClick(event, node)
             })
         }
         else if (node.type === 'file') {
-            if (node.text.replaceAll('*', '').endsWith('.igz')) 
+            const file = pak.files[node.fileIndex]
+
+            if (file.path.endsWith('.igz')) 
                 Main.showIGZPreview(node.fileIndex)                
             else 
                 Main.hideIGZPreview()
 
-            const file = pak.files[node.fileIndex]
             Main.showFileButtons(true)
             Main.setSyntaxHighlightedCode(file)
 
@@ -399,20 +468,21 @@ function onNodeClick(event, node)
 /**
  * Generates children for an asynchronous node when it is expanded
  */
-function onNodeLoadChildren(node, resolve) {
+function onNodeLoadChildren(node, resolve, _tree) {
     if (node == null) return
 
     let children = []
 
     if (node.type == 'object') {
         const object = igz.objects[node.objectIndex]
-        children = object.children.map(e => e.object.toNodeTree(false))
+        children = object.children.map(e => e.object.toNodeTree(false, [], object.name))
     }
     else if (node.type == 'fixup') {
         const fixup = igz.fixups[node.fixup]
         children = fixup.toNodeTree(igz.objects, true)
     }
 
+    requestAnimationFrame(() => Main.colorizeMainTree(_tree))
     resolve(children)
 }
 
@@ -574,7 +644,7 @@ function saveIGZ(filePath)
     localStorage.setItem('last_file', filePath)
 
     if (Main.objectView) Main.objectView.onSave()
-    Main.clearAllNodesUpdatedState()
+    Main.clearAllNodesUpdatedStateIGZ()
     Main.updateTitle()
 
     // TODO: refresh data view
@@ -595,7 +665,7 @@ function updateIGZWithinPAK()
 
     pak.updated = true
     if (Main.objectView) Main.objectView.onSave()
-    Main.clearAllNodesUpdatedState()
+    Main.clearAllNodesUpdatedStateIGZ()
     Main.updateTitle()
 
     console.log('Saved IGZ within PAK', igzFile.path)
@@ -818,15 +888,16 @@ async function main()
 {
     // Create preview tree (right)
     treePreview = Main.createTree('.tree-preview', { 
-        data: onNodeLoadChildren 
+        data: (node, resolve) => onNodeLoadChildren(node, resolve, treePreview)
     })
+    Main.applyTreeStyle()
 
     // Stop now if not main window
     if (!window.process.argv.includes('main_window')) return
 
     // Create main tree (left)
     Main.createMainTree({
-        data: onNodeLoadChildren,
+        data: (node, resolve) => onNodeLoadChildren(node, resolve, tree),
         editable: true, 
         editing: {
              add: false, 
@@ -842,6 +913,19 @@ async function main()
             Main.lastFileIndex = node.fileIndex
             Main.showIGZTree() // Open IGZ from PAK on double click
         }
+    })
+
+    // Resize tree buttons
+    const sizeIncrease = 1
+    elm('#size-minus').addEventListener('click', () => {
+        const currentSize = parseInt(localStorage.getItem('tree-size') ?? 18)
+        localStorage.setItem('tree-size', Math.max(14, currentSize - sizeIncrease))
+        Main.applyTreeStyle()
+    })
+    elm('#size-plus').addEventListener('click', () => {
+        const currentSize = parseInt(localStorage.getItem('tree-size') ?? 18)
+        localStorage.setItem('tree-size', Math.min(22, currentSize + sizeIncrease))
+        Main.applyTreeStyle()
     })
 
     /// Search bar

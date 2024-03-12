@@ -43,7 +43,6 @@ body {
   flex-grow: 1;
   flex-direction: column;
   overflow-y: auto;
-  font-weight: 300;
 }
 
 #tree-selector {
@@ -55,6 +54,10 @@ body {
 }
 
 .tree {
+  font-weight: 200;
+}
+
+.main-tree {
   flex-grow: 1;
 }
 
@@ -87,10 +90,20 @@ body {
   background: #434343;
   color: #fefefe;
   padding-inline-start: 5px;
+  font-size: .7rem;
 
   &::placeholder {
     color: #d0d0d0;
   }
+}
+
+#search-bar button {
+  background: #373737;
+  border: none;
+  color: #fefefe;
+  margin: 0 2px;
+  cursor: pointer;
+  font-family: Chivo;
 }
 
 /* Import button */
@@ -169,7 +182,7 @@ select {
   width: 50%;
   border-left: 1px solid white;
   padding-inline: 10px;
-  margin-top: 20px;
+  margin-top: 40px;
   overflow-y: auto;
   overflow-x: hidden;
 }

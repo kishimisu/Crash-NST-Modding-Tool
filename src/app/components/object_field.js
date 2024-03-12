@@ -549,8 +549,7 @@ class ObjectField {
             // Update object's node name in tree view
             parentObject.updated = Object.keys(updated_data[parentObject.index] ?? {}).length > 0
             const node = Main.tree.available().find(e => e.objectIndex == parentObject.index)
-            if (!parentObject.updated && node.text.endsWith('*')) node.set('text', node.text.slice(0, -1))
-            else if (parentObject.updated && !node.text.endsWith('*')) node.set('text', node.text + '*')
+            Main.setNodeUpdatedStateIGZ(node, parentObject.updated)
         }  
 
         if (this.bitfield) 

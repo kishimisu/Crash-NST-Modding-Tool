@@ -639,6 +639,7 @@ class IGZ {
 
                 new_root.push({
                     text: `${type} (${objects.length})`,
+                    type: 'type-group',
                     children: objects.map(e => e.toNodeTree(recursive))
                 })
             })

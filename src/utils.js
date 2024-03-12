@@ -139,6 +139,14 @@ function isVectorZero(vector) {
     return vector.every(e => e == 0)
 }
 
+function randomColor(type) {
+    const id = computeHash(type+'y')
+    const r = (id & 0xFF) / 255
+    const g = ((id >> 8) & 0xFF) / 255
+    const b = ((id >> 16) & 0xFF) / 255
+    return `rgb(${r * 127 + 127}, ${g * 127 + 127}, ${b * 127 + 127})`
+}
+
 /**
  * Computes the hash for a file path, file name or object name
  * https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
@@ -174,5 +182,6 @@ export {
     formatSize,
     computeHash,
     extractName,
-    isVectorZero
+    isVectorZero,
+    randomColor
 }

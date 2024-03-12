@@ -126,6 +126,14 @@ class igObject {
         }
     }
 
+    isDynamicType() {
+        return [
+            'Object',
+            'CVscComponentData',
+            'CDotNetEntityComponentData_1',
+        ].includes(this.type)
+    }
+
     toString() {
         return {
             name: this.name == '' ? this.getName() : this.name,

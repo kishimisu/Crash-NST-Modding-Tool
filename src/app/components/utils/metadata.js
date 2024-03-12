@@ -1,13 +1,17 @@
 import types_metadata from '../../../../assets/crash/types.metadata'
-import NST_FILE_INFOS from '../../../../assets/crash/files_infos.txt'
+import vsc_metadata   from '../../../../assets/crash/vsc_metadata.txt'
+import vsc_enums   from '../../../../assets/crash/vsc_enums.txt'
+import file_infos from '../../../../assets/crash/files_infos.txt'
 import { BufferView } from '../../../utils'
 
 /**
- * Reads all types metadata, enums metadata and types hierarchy from the metadata file.
+ * Reads objects metadata
  */
 const [TYPES_METADATA, ENUMS_METADATA, TYPES_HIERARCHY, TYPES_SIZES] = extract_metadata()
 
-const { namespace_hashes, file_types } = JSON.parse(NST_FILE_INFOS)
+const VSC_METADATA = extract_vsc_metadata()
+
+const { namespace_hashes, file_types } = JSON.parse(file_infos)
 
 function extract_metadata() {
     const start = performance.now()
@@ -148,6 +152,44 @@ function extract_metadata() {
 }
 
 /**
+ * Extract fields metadata for dynamic VSC objects
+ */
+function extract_vsc_metadata() {
+    const parsed_vsc = JSON.parse(vsc_metadata)
+    const parsed_enums = JSON.parse(vsc_enums)
+    const vsc_data = {}
+
+    for (const id in parsed_vsc) {
+        if (id == 'types') continue
+        const data = parsed_vsc[id].split(',')
+        vsc_data[id] = []
+
+        for (let i = 0; i < data.length; i++) {
+            const [name, typeID, size, offset] = data[i].split(':')
+            const type = parsed_vsc['types'][typeID]
+            const field = { name, type, size: +size, offset: +offset }
+
+            if (type == 'igEnumMetaField') field.enumType = name
+            
+            vsc_data[id].push(field)
+        }
+    }
+
+    for (const enumName in parsed_enums) {
+        const data = parsed_enums[enumName].split(',')
+
+        ENUMS_METADATA[enumName] = []
+
+        for (let i = 0; i < data.length; i++) {
+            const [name, value] = data[i].split(':')
+            ENUMS_METADATA[enumName].push({ name, value: +value })
+        }
+    }
+
+    return vsc_data
+}
+
+/**
  * Returns all types that inherit from the provided type.
  */
 function getAllInheritedChildren(type, all_children = new Set()) {
@@ -167,6 +209,7 @@ export {
     TYPES_METADATA,
     TYPES_SIZES,
     ENUMS_METADATA,
+    VSC_METADATA,
     namespace_hashes,
     file_types,
     getAllInheritedChildren

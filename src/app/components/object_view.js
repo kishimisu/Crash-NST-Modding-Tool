@@ -1,22 +1,14 @@
 import ObjectField, { clearUpdatedData } from './object_field'
 import { createElm, elm } from "./utils/utils"
-import { bitRead, isVectorZero } from '../../utils'
-import { ENUMS_METADATA, TYPES_METADATA, TYPES_SIZES } from './utils/metadata'
+import { bitRead, computeHash, isVectorZero } from '../../utils'
+import { TYPES_METADATA, VSC_METADATA } from './utils/metadata'
 import { ipcRenderer } from 'electron'
-import IGZ from '../../igz/igz'
 
 // Save interesting fields on IGZ load (fields that have 
 // different values between objects of the same type)
 const interesting_fields = {
     igz: null,
     fields: {}
-}
-
-// Save memory fields on IGZ load to be able to link 
-// their children if they are not in the same object
-const memory_fields = {
-    igz: null,
-    fields: []
 }
 
 class ObjectView {
@@ -34,7 +26,7 @@ class ObjectView {
         this.selected = null                  // { field, cell }, Currently selected field and cell 
 
         if (init_dom) {
-            elm('#object-name').innerText = object.getDisplayName()
+            elm('#object-name').innerHTML = object.getName().split('_').join('<wbr>_')
 
             const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity'].includes(object.type)
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
@@ -51,11 +43,34 @@ class ObjectView {
      * and sets their parent and children references.
      */ 
     initFields(fields) {
+        // Fetch dynamic objects fields from metadata
         if (this.object.type == 'CVscComponentData') {
-            const vscFields = this.initCVscComponentDataFields()
-            if (vscFields) fields = fields.concat(vscFields)
+            const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
+            if (inRNEX) {
+                const id = this.object.view.readUInt(0x20)
+                const metaObject = Main.igz.named_externals[id][1]
+                const vscFields = VSC_METADATA[computeHash(metaObject)]
+
+                if (vscFields != null) fields = fields.concat(vscFields)
+                else console.warn('VSC fields not found', metaObject, computeHash(metaObject))
+            }
+            else console.warn('CVscComponentData not in RNEX')
+        }
+        else if (this.object.type == 'CDotNetEntityComponentData_1' || this.object.type == 'Object') {
+            const offset = this.object.type == 'Object' ? 0x18 : 0x20
+            const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + offset)
+            if (inRNEX) {
+                const id = this.object.view.readUInt(offset)
+                const metaObject = Main.igz.named_externals[id][0]
+                const newFields = TYPES_METADATA[metaObject]
+
+                if (newFields != null) fields = newFields
+                else console.warn(this.object.type + ' fields not found', metaObject)
+            }
+            else console.warn(this.object.type + ' not in RNEX')
         }
 
+        // Create fields objects
         fields = fields.map(e => new ObjectField(e))
         fields.forEach(e => {
             e.object = this.object
@@ -63,65 +78,6 @@ class ObjectView {
             if (e.children) e.children = e.children.map(c => fields.find(f => f.name === c.name))
         })
         return fields
-    }
-
-    /**
-     * Scan the parent .pak archive for the corresponding VSC file,
-     * and extract the fields from its igVscDataMetaObject
-     * 
-     * @returns {ObjectField[]} Additional fields
-     */
-    initCVscComponentDataFields() {
-        const id     = this.object.view.readUInt(0x20)
-        const metaObject = Main.igz.named_externals[id] [1]
-        const vsc = Main.pak?.files.find(e => e.path.includes(metaObject))
-
-        const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
-        if (!inRNEX) console.warn('CVscComponentData not in RNEX')
-
-        if (vsc) {
-            const igz = IGZ.fromFileInfos(vsc)
-            igz.setupChildrenAndReferences()
-            const vscData = igz.objects.find(e => e.type == 'igVscDataMetaObject')
-            
-            if (vscData) {
-                let currentOffset = 0x28
-
-                const vscFields = vscData.children.slice(1).map((child, i) => {
-                    const field     = child.object
-                    const size      = TYPES_SIZES[field.type].size
-                    const alignment = TYPES_SIZES[field.type].alignment
-                    const offset    = ((currentOffset + (alignment - 1)) & -alignment)
-
-                    const newField = new ObjectField({
-                        name: field.name.replace('_metaField', ''),
-                        type: field.type,
-                        size,
-                        offset,
-                    })
-
-                    // Extract enum option names and values from igVectors
-                    if (field.type == 'igEnumMetaField') {
-                        const ifVscEnum = field.tryGetChild('igVscEnum')
-                        if (ifVscEnum != null) {
-                            const names  = ifVscEnum.extractMemoryData(igz, 0x20+8, 8).data.map(e => igz.fixups.TSTR.data[e])
-                            const values = ifVscEnum.extractMemoryData(igz, 0x38+8, 4).data
-                            ENUMS_METADATA[newField.name] = new Array(names.length).fill(0).map((e, i) => ({ name: names[i], value: values[i] }))
-                            newField.enumType = newField.name
-                        }
-                        else console.warn('igVscEnum not found')
-                    }
-
-                    currentOffset = offset + size
-
-                    return newField
-                })
-
-                return vscFields
-            }
-            else console.warn('igVscDataMetaObject not found')
-        }
-        else console.warn('VSC not found')
     }
 
     /**
@@ -181,7 +137,7 @@ class ObjectView {
         // Create default fields
         let objectSize = Main.igz.fixups.MTSZ.data[this.object.typeID]
 
-        if (this.object.type == 'CVscComponentData') {
+        if (this.object.isDynamicType()) {
             const lastField = this.fields.reduce((a, b) => b.offset > a.offset ? b : a)
             const lastOffset = lastField.offset + lastField.size
             objectSize = lastOffset + (lastOffset % 4 == 0 ? 0 : 4 - (lastOffset % 4))
@@ -510,7 +466,7 @@ class ObjectView {
             let firstValue = null
 
             if (field.children) continue
-            if (this.object.type == 'CVscComponentData' && i > 4) continue
+            if (this.object.isDynamicType() && i > 4) continue
 
             if (field.bitfield) {
                 const bytes = allObjects[0].view.readInt(field.offset)

@@ -225,6 +225,7 @@ class LevelExplorer {
                             try {
                                 Main.setIGZ(IGZ.fromFileInfos(fileInfos))
                                 Main.igz.setupEXID(getArchiveFolder(), Main.pak)
+                                Main.igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
                             }
                             catch (e) {
                                 console.error(e)

@@ -157,8 +157,12 @@ class igObject {
         let text = this.getName()
         let children = this.children.length > 0
 
-        if (children && recursive)  // Load children
+        if (children && this.inNodeTree) // Lazy load children
+            children = true
+        else if (children && recursive)  // Load children
             children = this.index == 0 ? null : this.children.map(e => e.object.toNodeTree(true, parentObjects.slice(), this.name))
+
+        this.inNodeTree = true
 
         // Shorten name if it starts with parent name
         if (parentName && parentName != '' && this.nameID != -1) {

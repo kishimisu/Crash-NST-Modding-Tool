@@ -32,6 +32,7 @@ body {
 }
 
 #left-area {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 50%;
@@ -126,6 +127,13 @@ body {
 
 #pak-import {
   display: none;
+}
+
+#display-mode {
+  display: none;
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 /* Level selector */

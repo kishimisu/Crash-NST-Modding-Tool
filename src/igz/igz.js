@@ -6,7 +6,7 @@ import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
 
-import { TYPES_METADATA, namespace_hashes, file_types } from '../app/components/utils/metadata.js'
+import { TYPES_METADATA, namespace_hashes, file_types, VSC_METADATA } from '../app/components/utils/metadata.js'
 
 
 const IGZ_VERSION      = 10
@@ -346,50 +346,91 @@ class IGZ {
      * Find children and references for all objects using fields of type
      * igObjectRef, igMemoryRef and igVector that appear in ROFS
      */
-    setupChildrenAndReferences() {
-        const isInParent = (obj, child) => {
-            for (const ref of obj.references) {
-                if (ref == child || isInParent(ref, child)) return true
-            }
-            return false
-        }
-
+    setupChildrenAndReferences(mode = 'root') {
         for (const object of this.objects) {
             object.children = []
             object.references = []
         }
 
-        if (this.fixups.ROFS == null) return
-
-        // As ROFS is in increasing order, we can keep track of the last highest
-        // offset instead of looping through all ROFS elements for all objects
-        let rofsIndex = 0
-        const rofs = this.fixups.ROFS.data
-        const currentROFS = () => this.getGlobalOffset(rofs[rofsIndex])
-        const checkROFS   = (offset) => {
-            while (currentROFS() < offset && rofsIndex < rofs.length - 1) {
-                rofsIndex++
+        if (mode == 'alchemist') {
+            // Simple (broken) children detection like the Alchemist does
+            for (const object of this.objects) {
+                for (let k = 0; k < object.size; k += 4) {
+                    const offset = object.view.readUInt(k)
+                    if (offset == 0) continue
+                    const child = this.objects.find(e => e.offset == offset)
+                    if (child != null && child != object) {
+                        object.children.push({ object: child, offset: k })
+                        child.references.push(object)
+                    }
+                }
             }
-            return currentROFS() == offset
+            return
         }
 
-        // First pass: use metadata to find children
+        if (this.fixups.ROFS == null) return
+        const rofs = this.fixups.ROFS.data.map(e => this.getGlobalOffset(e))
+
         for (const object of this.objects) {
             const fields = { object: [], memory: [],  vector: [] }
 
-            TYPES_METADATA[object.type].forEach(e => {
+            let metadata = TYPES_METADATA[object.type]
+
+            // Handle dynamic objects
+            if (object.type == 'CDotNetEntityComponentData_1' || object.type == 'Object') {
+                const isObject = object.type == 'Object'
+                const offset = isObject ? 0x18 : 0x20
+                const id = object.view.readUInt(offset)
+                const metaObject = this.named_externals[id][0]
+                const newMetadata = TYPES_METADATA[metaObject]
+
+                const inRNEX = this.fixups.RNEX?.data.includes(object.offset + offset)
+                if (!inRNEX) console.warn(this.type + ' not in RNEX')
+                if (newMetadata != null) metadata = newMetadata
+                else console.warn(this.type + ' fields not found', metaObject)
+            }
+            else if (object.type == 'CVscComponentData') {
+                const id = object.view.readUInt(0x20)
+                const metaObject = this.named_externals[id][1]
+    
+                const inRNEX = this.fixups.RNEX?.data.includes(object.offset + 0x20)
+                if (!inRNEX) console.warn('CVscComponentData not in RNEX')
+    
+                const vscFields = VSC_METADATA[computeHash(metaObject)]
+                if (vscFields == null) console.warn('VSC fields not found', metaObject, computeHash(metaObject))
+                else vscFields.forEach(field => {
+                    if (field.type == 'igHandleMetaField') {
+                        const handle = object.view.readUInt(field.offset)
+                        const offsetROFS = object.offset + field.offset
+                        const isActive = this.fixups.RHND?.data.includes(offsetROFS)
+                        const isHandle = handle & 0x80000000
+
+                        // Check that field is active and is a handle (EXNM and not EXID)
+                        if (isActive && isHandle) {
+                            const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
+
+                            const ref = this.objects.find(e => e.name == name)
+                            if (ref != null && ref != object) {
+                                object.children.push({ object: ref, offset: field.offset })
+                                ref.references.push(object)
+                            }
+                            else console.warn('Object not found: ' + name)
+                        }
+                    }})
+            }
+
+            metadata.forEach(e => {
                 if (e.type == 'igObjectRefMetaField') fields.object.push(e)
                 if (e.type == 'igMemoryRefMetaField') fields.memory.push(e)
                 if (e.type == 'igVectorMetaField') fields.vector.push(e)
             })
 
             const addChild = (offset, offsetROFS) => {
-                if (offset == 0 || !checkROFS(offsetROFS)) return
+                if (offset == 0 || !rofs.includes(offsetROFS)) return
 
                 const child = this.findObject(offset)
 
                 if (child != null && child != object) {
-                    if (isInParent(object, child)) return
                     object.children.push({ object: child, offset: offsetROFS - object.global_offset })
                     child.references.push(object)
                 }
@@ -418,29 +459,6 @@ class IGZ {
                 }
             }
         }
-
-        rofsIndex = 0
-
-        // Second pass: loop through objects bytes to find remaining children
-        // (Not correct, but allow to find children for dynamic objects not present in the metadata, ie. CVscComponentData)
-        for (let i = 1; i < this.objects.length; i++) {
-            const object = this.objects[i]
-            if (object.children.length > 0) continue
-
-            for (let i = 0; i < object.size; i += 4) {
-                const offsetROFS = object.global_offset + i
-                if (!checkROFS(offsetROFS)) continue
-
-                const offset = object.view.readUInt(i)
-                const child = this.findObject(offset)
-
-                if (child != null && child != object && (child.references.length == 0 || child.references.length == 1 && child.references[0] == this.objectList)) {
-                    if (isInParent(object, child)) continue
-                    object.children.push({ object: child, offset: i })
-                    child.references.push(object)
-                }
-            }
-        }
     }
 
     /**
@@ -451,8 +469,6 @@ class IGZ {
      */
     setupEXID(archives_folder, pak) 
     {
-        this.setupChildrenAndReferences()
-
         if (!this.fixups.EXID) return
 
         const findFileInPAK   = (pak, file_hash)   => pak.files.find(e => computeHash(extractName(e.path)) == file_hash)
@@ -597,24 +613,26 @@ class IGZ {
      * @returns {igObject[]} List of all root objects
      */
     getRootObjects() {
-        return this.objects.filter(e => e.nameID != -1 && e.references.length == 1)
+        return this.objects.filter(e => e.nameID != -1 && e.references.length == 1 && e.references[0] == this.objectList)
     }
 
     /**
      * Convert the IGZ file to a tree structure for UI display
      */
-    toNodeTree(recursive = true) {
+    toNodeTree(recursive = true, mode = 'root') {
         const unreferenced = this.objects.filter(e => e.references.length == 0)
-        let root = this.getRootObjects()
+        const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
+        let root = mode == 'all' ? this.objects.filter(e => e.nameID != -1) : this.getRootObjects()
         let rootText = 'Root Objects'
 
-        if (this.objects.length > 0 && root.length == 0) {
+        this.objects.forEach(e => e.inNodeTree = false)
+
+        if (this.objects.length > 0 && root.length == 0 && !vscRoot) {
             root = this.objects.filter(e => !unreferenced.includes(e))
             rootText = 'All Objects'
         }
 
         // Special display for VSC objects
-        const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
         if (vscRoot) {
             root = root.filter(e => e != vscRoot)
             rootText = 'Other Objects'

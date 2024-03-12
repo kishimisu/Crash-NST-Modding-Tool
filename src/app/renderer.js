@@ -104,6 +104,7 @@ class Main {
         elm('#pak-import').style.display = 'block' // Show import button
         elm('#back-pak').style.display = 'none'    // Hide back button
         elm('#data-struct').style.display = 'none' // Hide data struct
+        elm('#display-mode').style.display = 'none'
         elm('#auto-refresh').checked = true
         elm('#use-current-pak').parentNode.style.display = 'flex'
     }
@@ -115,7 +116,7 @@ class Main {
 
         this.treeMode = 'igz'
         tree.load([]) 
-        tree.load(igz.toNodeTree())
+        tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
         if (tree.nodes().length == 3)
             tree.get(1).expand()
 
@@ -131,6 +132,7 @@ class Main {
         elm('#back-pak').style.display = pak == null ? 'none' : 'block'
         elm('#auto-refresh').checked = igz.objects.length < 500
         elm('#use-current-pak').parentNode.style.display = 'none'
+        elm('#display-mode').style.display = 'block'
     }
 
     // Reload main tree view, keeping expanded state and selected node
@@ -257,6 +259,7 @@ class Main {
                 
                 igz = IGZ.fromFileInfos(pak.files[fileIndex])
                 igz.setupEXID(getArchiveFolder(), pak)
+                igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
 
                 if (showProgress) ipcRenderer.send('set-progress-bar', null)
             }
@@ -274,7 +277,7 @@ class Main {
 
         this.igz = igz
         
-        treePreview.load(igz.toNodeTree(false))
+        treePreview.load(igz.toNodeTree(false, localStorage.getItem('display-mode')))
         this.colorizeMainTree(treePreview)
         if (treePreview.nodes().length == 3) treePreview.get(1).expand()
     }
@@ -572,6 +575,7 @@ function loadIGZ(filePath)
         Main.setPak(null)
         igz = IGZ.fromFile(filePath)
         igz.setupEXID(getArchiveFolder())
+        igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
         Main.igz = igz
         Main.showIGZTree()
 
@@ -1085,6 +1089,17 @@ async function main()
         Main.showIGZPreview(lastIndex)    
         Main.setSyntaxHighlightedCode(pak.files[lastIndex])
     })
+
+    // (IGZ view) Select object display mode
+    elm('#display-mode').addEventListener('change', () => {
+        const value = elm('#select-display-mode').value
+        localStorage.setItem('display-mode', value)
+        igz.setupChildrenAndReferences(value)
+        tree.load([]) 
+        tree.load(igz.toNodeTree(true, value))
+        Main.colorizeMainTree()
+    })
+    elm('#select-display-mode').value = localStorage.getItem('display-mode') ?? 'root'
 
     if (localStorage.getItem('first_launch') == null) {
         localStorage.setItem('first_launch', false)

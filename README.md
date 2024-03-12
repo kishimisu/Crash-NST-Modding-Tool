@@ -2,7 +2,7 @@
 
 This tool lets you explore and edit .pak archives and .igz files for the PC version of Crash NST.
 
-![demo](./assets/images/demo3.jpg)
+![demo](./assets/images/demo4.jpg)
 
 Some of the features:
 - Import .igz files from other archives + automatic dependency import
@@ -105,13 +105,19 @@ When opening a .igz file, every object will be scanned to check for "interesting
 
 - Likewise, the references (parents) of objects are listed at the bottom of every object view. You can click on any of their name to focus/jump to the corresponding parent object.
 
+#### Object display mode
+Choose how to display objects in the tree view:
+- **Root objects**: Only display root objects (that are not referenced by any other object)
+- **All objects**: Display all named objects, grouped by type
+- **Alchemist**: Display objects like Alchemist does (less correct)
+
 #### Additional infos
 Depending on their type, detailed informations are available when hovering the name and type of properties.
 
 <a name="explorer"></a>
 ## Level Explorer
 
-![demo](./assets/images/demo4.jpg)
+![demo](./assets/images/demo3.jpg)
 
 When loading a pak archive, you have the possibility to open a work-in-progress 3D scene viewer that will scan through all entities of the level files and try to display them using their corresponding model file.
 
@@ -124,7 +130,7 @@ If you've ever played Minecraft, it works like Creative Mode.
 
 ### Menu Options
 
-- **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. This will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CPhyisicalEntities` (red) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
+- **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. This will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CActors` (yellow), `CPhyisicalEntities` (red) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
 
 - **Show Splines**: Whether to show `igSplineControlPoints` (camera paths, bonus platform paths...)
 

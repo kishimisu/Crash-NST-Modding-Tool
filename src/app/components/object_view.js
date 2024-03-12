@@ -28,7 +28,7 @@ class ObjectView {
         if (init_dom) {
             elm('#object-name').innerHTML = object.getName().split('_').join('<wbr>_')
 
-            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity'].includes(object.type)
+            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(object.type)
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
             elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
 

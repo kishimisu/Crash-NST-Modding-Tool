@@ -158,7 +158,7 @@ class LevelExplorer {
         if (!this.initialized) {
             if (!this.renderer) this.initRenderer()
             this.scene = new Scene()
-            this.cam = new PerspectiveCamera(75, canvas.width / canvas.height, 1, 40000)
+            this.cam = new PerspectiveCamera(75, canvas.width / canvas.height, 1, 50000)
 
             this.transformControls = new TransformControls(this.cam, this.renderer.domElement)
             this.transformControls.setMode('translate')
@@ -254,7 +254,7 @@ class LevelExplorer {
                 }
             })
 
-            const fog = new FogExp2(0x2661ab, 0.00006)
+            const fog = new FogExp2(0x2661ab, 0.00004)
             this.scene.fog = fog
 
             this.initialized = true
@@ -309,7 +309,7 @@ class LevelExplorer {
 
         const models = {}
         const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
-        const hidden_objects = ['cloud', 'shadow', 'palmcluster']
+        const hidden_objects = ['cloud', 'shadow', 'palmcluster', 'palmtrees', 'treeplane', 'levelendscene', 'bonusround']
         
         // Create model meshes
         for (let i = 0; i < modelFiles.length; i++) {
@@ -335,13 +335,14 @@ class LevelExplorer {
         }
         
         const processObjects = (igz, type, callback) => {
-            const objects = igz.objects.filter(e => e.type == type && e.references.length <= 1)
+            const objects = igz.objects.filter(e => e.type == type)
             const validObjects = []
 
             for (const object of objects) {
                 const lowername = object.name.toLowerCase()
                 if (!showGrass && lowername.includes('grass')) continue
                 if (!show_all_objects && hidden_objects.some(e => lowername.includes(e))) continue
+                if (!show_all_objects && object.references.some(e => hidden_objects.some(h => e.name.toLowerCase().includes(h)))) continue
                 const result = callback(igz, object)
                 if (result) validObjects.push(result)
             }
@@ -353,7 +354,8 @@ class LevelExplorer {
             CEntities: [],
             CGameEntities: [],
             CPhysicalEntities: [],
-            CPlayerStartEntities: []
+            CPlayerStartEntities: [],
+            CActors: []
         }
 
         const processNextFile = (index = 0) => {
@@ -371,13 +373,15 @@ class LevelExplorer {
             const CGameEntities     = processObjects(igz, 'CGameEntity', this.process_CGameEntity)
             const CPhysicalEntities = processObjects(igz, 'CPhysicalEntity', this.process_CPhysicalEntity)
             const CPlayerStartEntity = processObjects(igz, 'CPlayerStartEntity', this.process_CPlayerStartEntity)
-            const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPhysicalEntities).concat(CPlayerStartEntity)
+            const CActors            = processObjects(igz, 'CActor', this.process_CActor)
+            const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPhysicalEntities).concat(CPlayerStartEntity).concat(CActors)
 
             loaded.igEntities.push(...igEntities)
             loaded.CEntities.push(...CEntities)
             loaded.CGameEntities.push(...CGameEntities)
             loaded.CPhysicalEntities.push(...CPhysicalEntities)
             loaded.CPlayerStartEntities.push(...CPlayerStartEntity)
+            loaded.CActors.push(...CActors)
 
             for (const entity of entities) {
                 if (entity == null) continue
@@ -392,7 +396,7 @@ class LevelExplorer {
                     continue
                 }
 
-                const model_name = entity.model_name.split('\\').pop().replace('.igb', '')
+                const model_name = entity.model_name.split('\\').pop().split('/').pop().replace('.igb', '')
                 const model = models[model_name]
 
                 if (model == null) console.warn(`Could not find model ${model_name}`)
@@ -408,7 +412,6 @@ class LevelExplorer {
                 if (position != null)
                     this.cam.position.set(position[0], position[1] + 200, position[2] - 300)
                 this.renderer.render(this.scene, this.cam)
-                console.log('Loaded', loaded)
             }
         }
 
@@ -491,6 +494,18 @@ class LevelExplorer {
         const CPhysicalEntityData = object.getChild('CPhysicalEntityData')
         const model_name = CPhysicalEntityData.getModel(igz)
         const color = 0xee222e
+
+        const igEntityTransform = object.tryGetChild('igEntityTransform')
+        const transform = igEntityTransform?.getTransform()
+
+        return object.toMeshInfo(igz, { model_name, transform, color })
+    }
+
+    process_CActor(igz, object)
+    {
+        const CActorData = object.getChild('CActorData')
+        const model_name = CActorData.getModel(igz)
+        const color = 0xffff00
 
         const igEntityTransform = object.tryGetChild('igEntityTransform')
         const transform = igEntityTransform?.getTransform()

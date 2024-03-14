@@ -224,6 +224,10 @@ class Main {
                     children[0].style.color = typeColor
                     if (children[1]) children[1].style.color = ''
                 }
+                if (object.invalid != null) {
+                    children[0].style.color = 'red'
+                    if (children[1]) children[1].style.color = 'red'
+                }
             }
         })
     }
@@ -278,7 +282,8 @@ class Main {
                 children: [{ text: e.message }],
             }])
             treePreview.get(0).itree.ref.style.color = '#e3483a'
-            throw (e)
+            console.error(e)
+            return
         }
 
         this.igz = igz
@@ -340,7 +345,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.17 - '
+        const title = 'The Apprentice v1.19 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -651,14 +656,13 @@ function savePAK(filePath)
 // Save current igz to a .igz file
 function saveIGZ(filePath) 
 {
+    igz.setupChildrenAndReferences('root', (localStorage.getItem('save-refcount') ?? 'true') === 'true')
     igz.save(filePath)
     localStorage.setItem('last_file', filePath)
 
     if (Main.objectView) Main.objectView.onSave()
     Main.clearAllNodesUpdatedStateIGZ()
     Main.updateTitle()
-
-    // TODO: refresh data view
 
     console.log('Saved ' + filePath)
 }
@@ -667,6 +671,8 @@ function saveIGZ(filePath)
 function updateIGZWithinPAK() 
 {
     const igzFile = pak.files[Main.lastFileIndex]
+
+    igz.setupChildrenAndReferences('root', (localStorage.getItem('save-refcount') ?? 'true') === 'true')
 
     igzFile.data = igz.save()
     igzFile.size = igzFile.data.length
@@ -893,6 +899,13 @@ function toggleEndian(bigEndian) {
 }
 
 /**
+ * Toggle whether to save the referenceCount on igz save
+ */
+function toggleSaveReferenceCount(saveReferenceCount) {
+    localStorage.setItem('save-refcount', saveReferenceCount)
+}
+
+/**
  * Main app window entry point
  */
 async function main() 
@@ -940,20 +953,19 @@ async function main()
     })
 
     /// Search bar
-    const caseSensitiveElm = elm('#case-sensitive')
     const autoRefreshElm   = elm('#auto-refresh')
 
     // Search on type if auto-refresh is enabled
     elm('#search-bar').addEventListener('input', (event) => {
         if (autoRefreshElm.checked) {
-            searchTree(event.target.value, caseSensitiveElm.checked)
+            searchTree(event.target.value)
         }
     })
 
     // Search on press Enter if auto-refresh is disabled
     elm('#search-bar').addEventListener('keydown', (event) => {
         if (event.key == 'Enter' && !autoRefreshElm.checked) {
-            searchTree(event.target.value, caseSensitiveElm.checked)
+            searchTree(event.target.value)
         }
     })
 
@@ -1145,6 +1157,7 @@ ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
 ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
+ipcRenderer.on('menu-toggle-refcount', (_, checked) => toggleSaveReferenceCount(checked))
 
 ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
 ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())

@@ -15,18 +15,17 @@ class ObjectView {
     hoverColor = '#4c4c4c'
     
     constructor(object, init_dom = true) {
-        const fields = TYPES_METADATA[object.type] // Retrieve fields metadata from the object's type
-
         this.container = elm('#object-view')  // Field list DOM container
         this.object = object                  // parent igObject reference
 
-        this.fields = this.initFields(fields) // Array of ObjectField instances
+        this.fields = this.initFields()       // Array of ObjectField instances
         this.hexCells = []                    // Array of cells from the hex data view
 
         this.selected = null                  // { field, cell }, Currently selected field and cell 
 
         if (init_dom) {
             elm('#object-name').innerHTML = object.getName().split('_').join('<wbr>_')
+            if (object.invalid) elm('#object-name').innerHTML += ` <span style="color: #ff0000; font-weight: 200">(${object.invalid})</span>`
 
             const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(object.type)
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
@@ -42,36 +41,10 @@ class ObjectView {
      * Converts fields infos to ObjectField instances
      * and sets their parent and children references.
      */ 
-    initFields(fields) {
-        // Fetch dynamic objects fields from metadata
-        if (this.object.type == 'CVscComponentData') {
-            const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + 0x20)
-            if (inRNEX) {
-                const id = this.object.view.readUInt(0x20)
-                const metaObject = Main.igz.named_externals[id][1]
-                const vscFields = VSC_METADATA[computeHash(metaObject)]
-
-                if (vscFields != null) fields = fields.concat(vscFields)
-                else console.warn('VSC fields not found', metaObject, computeHash(metaObject))
-            }
-            else console.warn('CVscComponentData not in RNEX')
-        }
-        else if (this.object.type == 'CDotNetEntityComponentData_1' || this.object.type == 'Object') {
-            const offset = this.object.type == 'Object' ? 0x18 : 0x20
-            const inRNEX = Main.igz.fixups.RNEX?.data.includes(this.object.offset + offset)
-            if (inRNEX) {
-                const id = this.object.view.readUInt(offset)
-                const metaObject = Main.igz.named_externals[id][0]
-                const newFields = TYPES_METADATA[metaObject]
-
-                if (newFields != null) fields = newFields
-                else console.warn(this.object.type + ' fields not found', metaObject)
-            }
-            else console.warn(this.object.type + ' not in RNEX')
-        }
-
+    initFields() {
         // Create fields objects
-        fields = fields.map(e => new ObjectField(e))
+        const fields = this.object.getFieldsMetadata(Main.igz)
+                                  .map(e => new ObjectField(e))
         fields.forEach(e => {
             e.object = this.object
             if (e.parent)   e.parent = fields.find(f => f.name === e.parent.name)
@@ -134,10 +107,10 @@ class ObjectView {
             }
         }
 
-        // Create default fields
         let objectSize = Main.igz.fixups.MTSZ.data[this.object.typeID]
 
-        if (this.object.isDynamicType()) {
+        // Update object size for dynamic objects
+        if (this.object.dynamicObject) {
             const lastField = this.fields.reduce((a, b) => b.offset > a.offset ? b : a)
             const lastOffset = lastField.offset + lastField.size
             objectSize = lastOffset + (lastOffset % 4 == 0 ? 0 : 4 - (lastOffset % 4))
@@ -145,6 +118,7 @@ class ObjectView {
 
         const rowCount = Math.ceil(objectSize / bytesPerRow)
 
+        // Create default fields
         for (let i = 0; i < rowCount; i++) {
             const row = createRow(table, i)
 
@@ -159,6 +133,7 @@ class ObjectView {
 
         let additionalOffset = objectSize + (objectSize % 4 == 0 ? 0 : 4 - (objectSize % 4))
 
+        // Create memory fields
         for (const field of this.fields.filter(e => e.isMemoryType())) {
             if (!field.children.length) continue
 
@@ -253,13 +228,16 @@ class ObjectView {
         this.container.onmouseleave = () => this.onMouseLeave()
         Main.showObjectDataView(true)
 
-        // Setup MemoryRef fields
+        // Setup MemoryRef & Array fields
         for (const field of this.fields) {
             if (field.type == 'igMemoryRefMetaField') {
                 this.setupMemoryRefField(field)
             }
             else if (field.type == 'igVectorMetaField') {
                 this.setupMemoryRefField(field, 8) // igVectors contains a igMemoryRef
+            }
+            else if (field.type == 'igObjectRefArrayMetaField') {
+                this.setupObjectRefArrayField(field)
             }
         }
 
@@ -396,6 +374,31 @@ class ObjectView {
         updateField(keys)
     }
 
+    setupObjectRefArrayField(field) {
+        const elementCount = field.size / 8
+        const newFields = []
+
+        for (let i = 0; i < elementCount; i++) {
+            const newField = new ObjectField({
+                name: field.name + ' #' + i,
+                type: 'igObjectRefMetaField',
+                refType: field.refType,
+                size: 8,
+                offset: field.offset + i * 8,
+                parent: field,
+                object: this.object,
+            })
+            newFields.push(newField)
+        }
+
+        const fieldIndex = this.fields.indexOf(field)
+        this.fields = this.fields.slice(0, fieldIndex + 1).concat(newFields).concat(this.fields.slice(fieldIndex + 1))
+
+        field.children = newFields
+        field.collapsable = true
+        field.refType = null
+    }
+
     // Update an object's data when a field is modified
     // Apply changes to all objects if the "Apply to all" checkbox is checked
     onFieldUpdate(field, value, id) {
@@ -466,7 +469,7 @@ class ObjectView {
             let firstValue = null
 
             if (field.children) continue
-            if (this.object.isDynamicType() && i > 4) continue
+            if (this.object.dynamicObject && i > 4) continue
 
             if (field.bitfield) {
                 const bytes = allObjects[0].view.readInt(field.offset)

@@ -77,6 +77,7 @@ function extract_metadata() {
                 type: names[view.readUInt16()],
                 offset: view.readUInt16(),
                 size: view.readUInt16(),
+                refCounted: view.readByte() === 1,
                 alignment: view.readUInt16(),
                 static: view.readByte() === 1
             }

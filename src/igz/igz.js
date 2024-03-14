@@ -150,7 +150,7 @@ class IGZ {
             const object = this.objects.find(e => e.offset == offset)
 
             if (name == null) throw new Error('Name is null: ' + nameID)
-            if (object == null) console.warn(`Entry #${i} (offset: ${offset}, name: ${name}) is not present in RVTB`)
+            if (object == null) return console.warn(`Entry #${i} (offset: ${offset}, name: ${name}) is not present in RVTB`)
 
             object.name = name
             object.nameID = nameID
@@ -346,10 +346,12 @@ class IGZ {
      * Find children and references for all objects using fields of type
      * igObjectRef, igMemoryRef and igVector that appear in ROFS
      */
-    setupChildrenAndReferences(mode = 'root') {
+    setupChildrenAndReferences(mode = 'root', updateReferenceCount = false) {
         for (const object of this.objects) {
             object.children = []
             object.references = []
+            object.referenceCount = 0 // Reference count (as per refCounted)
+            object.invalid = null
         }
 
         if (mode == 'alchemist') {
@@ -372,79 +374,66 @@ class IGZ {
         const rofs = this.fixups.ROFS.data.map(e => this.getGlobalOffset(e))
 
         for (const object of this.objects) {
-            const fields = { object: [], memory: [],  vector: [] }
+            const fields = { object: [], memory: [] }
 
-            let metadata = TYPES_METADATA[object.type]
-
-            // Handle dynamic objects
-            if (object.type == 'CDotNetEntityComponentData_1' || object.type == 'Object') {
-                const isObject = object.type == 'Object'
-                const offset = isObject ? 0x18 : 0x20
-                const id = object.view.readUInt(offset)
-                const metaObject = this.named_externals[id][0]
-                const newMetadata = TYPES_METADATA[metaObject]
-
-                const inRNEX = this.fixups.RNEX?.data.includes(object.offset + offset)
-                if (!inRNEX) console.warn(this.type + ' not in RNEX')
-                if (newMetadata != null) metadata = newMetadata
-                else console.warn(this.type + ' fields not found', metaObject)
-            }
-            else if (object.type == 'CVscComponentData') {
-                const id = object.view.readUInt(0x20)
-                const metaObject = this.named_externals[id][1]
-    
-                const inRNEX = this.fixups.RNEX?.data.includes(object.offset + 0x20)
-                if (!inRNEX) console.warn('CVscComponentData not in RNEX')
-    
-                const vscFields = VSC_METADATA[computeHash(metaObject)]
-                if (vscFields == null) console.warn('VSC fields not found', metaObject, computeHash(metaObject))
-                else vscFields.forEach(field => {
-                    if (field.type == 'igHandleMetaField') {
-                        const handle = object.view.readUInt(field.offset)
-                        const offsetROFS = object.offset + field.offset
-                        const isActive = this.fixups.RHND?.data.includes(offsetROFS)
-                        const isHandle = handle & 0x80000000
-
-                        // Check that field is active and is a handle (EXNM and not EXID)
-                        if (isActive && isHandle) {
-                            const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
-
-                            const ref = this.objects.find(e => e.name == name)
-                            if (ref != null && ref != object) {
-                                object.children.push({ object: ref, offset: field.offset })
-                                ref.references.push(object)
-                            }
-                            else console.warn('Object not found: ' + name)
-                        }
-                    }})
-            }
+            let metadata = object.getFieldsMetadata(this)
 
             metadata.forEach(e => {
-                if (e.type == 'igObjectRefMetaField') fields.object.push(e)
-                if (e.type == 'igMemoryRefMetaField') fields.memory.push(e)
-                if (e.type == 'igVectorMetaField') fields.vector.push(e)
+                if (e.type == 'igObjectRefMetaField') {
+                    fields.object.push(e)
+                } 
+                else if (e.type == 'igMemoryRefMetaField' || e.type == 'igVectorMetaField') {
+                    fields.memory.push(e)
+                }
+                else if (e.type == 'igObjectRefArrayMetaField') {
+                    const count = e.size / 8
+                    for (let i = 0; i < count; i++) {
+                        fields.object.push({ offset: e.offset + i * 8, refCounted: e.refCounted })
+                    }
+                }
+                else if (e.type == 'igHandleMetaField') {
+                    const handle = object.view.readUInt(e.offset)
+                    const offsetROFS = object.offset + e.offset
+                    const isActive = this.fixups.RHND?.data.includes(offsetROFS)
+                    const isHandle = handle & 0x80000000
+
+                    // Check that field is active and is a handle (EXNM and not EXID)
+                    if (isActive && isHandle) {
+                        const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
+
+                        const ref = this.objects.find(e => e.name == name)
+                        if (ref != null && ref != object) {
+                            object.children.push({ object: ref, offset: e.offset })
+                            ref.references.push(object)
+                        }
+                    }
+                }
             })
 
-            const addChild = (offset, offsetROFS) => {
+            const addChild = (offset, offsetROFS, refCounted = true) => {
                 if (offset == 0 || !rofs.includes(offsetROFS)) return
 
                 const child = this.findObject(offset)
 
                 if (child != null && child != object) {
-                    object.children.push({ object: child, offset: offsetROFS - object.global_offset })
-                    child.references.push(object)
+                    if (!object.children.some(e => e.object == child)) {
+                        object.children.push({ object: child, offset: offsetROFS - object.global_offset })
+                        child.references.push(object)
+                    }
+                    if (refCounted) 
+                        child.referenceCount++
                 }
             }
 
             // Add igObjectRefs
             for (const ref of fields.object) {
                 const offset = object.view.readUInt(ref.offset)
-                addChild(offset, object.global_offset + ref.offset)
+                addChild(offset, object.global_offset + ref.offset, ref.refCounted)
             }
 
-            // Add igMemoryRefs and igVectors
-            for (const ref of fields.memory.concat(fields.vector)) {
-                if (ref.memType != 'igObjectRefMetaField') continue
+            // Add igObjectRefs from igMemoryRefs and igVectors
+            for (const ref of fields.memory) {
+                if (ref.memType != 'igObjectRefMetaField' && ref.memType != 'DotNetDataMetaField') continue
 
                 const offset = object.view.readUInt(ref.offset)
                 if (offset == 0) continue
@@ -454,11 +443,24 @@ class IGZ {
                 if (child != null) {
                     const isMemoryRef = ref.type == 'igMemoryRefMetaField'
                     const {data, dataOffset, active} = object.extractMemoryData(this, ref.offset + (isMemoryRef ? 0 : 8), 8)
-                    if (active)
-                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8))
+                    if (active) {
+                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8, ref.refCounted))
+                    }
                 }
             }
         }
+
+        // Update reference count
+        this.objects.forEach(object => {
+            const ref = object.view.readUInt(8)
+
+            if (ref != object.referenceCount) {
+                if (updateReferenceCount) 
+                    object.view.setUInt(object.referenceCount, 8)
+                else 
+                    object.invalid = 'Invalid reference count'
+            }
+        })
     }
 
     /**

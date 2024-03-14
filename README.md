@@ -64,54 +64,47 @@ Note: When importing a .igz file directly (not from an archive), it will be plac
 
 **Backup & Restore**: You can choose to backup and restore the game archives folder. Be sure that it is unmodified when first backing it up.
 
-**Change the endianess**: When viewing objects data in an igz, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
-
 **3D Model Viewer**: When selecting actors or model files in a .pak archive, a 3D preview of the model will also be displayed.
 
 <a name="igz"></a>
 ## IGZ Editor
 
-*Allows you to explore .igz files within PAK archives or standalone IGZs*
+*Allows you to explore and edit .igz files within PAK archives or standalone IGZs*
 
 ![demo](./assets/images/demo2.jpg)
 
-#### Elements
-
-- **Fixups**: Fixups are lists of names (`TSTR`), types (`TMET`), handles and external dependencies (`EXNM`, `EXID`, `TDEP`). R-fixups contains offsets to objects and properties inside the igz file. For each offset, the referenced object's name is displayed along with the relative offset inside the object. You can click on them to display the object's view.
-
-- **Objects**: List of root objects referenced in the file, grouped by type.
-
-- **Unreferenced objects**: Contains objects that are not referenced by any other. Usually, it will have two entries (igObjectList & igNameList).
-
-
-### Data editing
-
 The objects in IGZ files are associated with their original metadata, so it's possible to view their name and type as well as edit the corresponding value.
 
-#### Relative calculations
+### Options
 
-You can do relative computations when editing a number value. For example writing `* 2` will multiply the current value by two.
-It also works with `+ 2`, `/ 2` but it needs to be `-= 2` for subtraction to prevent confusing with the negative number `-2`.
+**Change the endianess**: When viewing objects data, the bytes are displayed in big endian format by default. You can switch to little endian in the `Settings` menu.
 
-#### Multi-editing
-If you select an object that is the result of a search query, you will have the possibility to apply your changes to every selected object at the exact same offset.
-Relative calculation works with multi-editing and will affect each object's relative to its original value.
+**Update referenceCount on save**: Each object contains a reference count which needs to be recalculated after updating `igObjectRef` properties. Selecting this option will do this process automatically upon saving the file.
 
-#### Interesting properties
-When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. These properties will be colored in red. All properties in white have the same value for all other objects of the same type.
-
-#### Jump to objects (⇒)
-- If properties of type `Object Ref` or `Handle` are referencing an object within the current .igz file, you can click on their name to focus/jump to the referenced object.
-
-- Likewise, the references (parents) of objects are listed at the bottom of every object view. You can click on any of their name to focus/jump to the corresponding parent object.
-
-#### Object display mode
+### Object display mode
 Choose how to display objects in the tree view:
 - **Root objects**: Only display root objects (that are not referenced by any other object)
 - **All objects**: Display all named objects, grouped by type
 - **Alchemist**: Display objects like Alchemist does (less correct)
 
-#### Additional infos
+### Relative calculations
+
+You can do relative computations when editing a number value. For example writing `* 2` will multiply the current value by two.
+It also works with `+ 2`, `/ 2` but it needs to be `-= 2` for subtraction to prevent confusing with the negative number `-2`.
+
+### Multi-editing
+If you select an object that is the result of a search query, you will have the possibility to apply your changes to every selected object at the exact same offset.
+Relative calculation works with multi-editing and will affect each object's relative to its original value.
+
+### Interesting properties
+When opening a .igz file, every object will be scanned to check for "interesting" properties, ie. properties for which the value can change between objects of the same type within the file. These properties will be colored in red. All properties in white have the same value for all other objects of the same type.
+
+### Jump to objects (⇒)
+- If properties of type `Object Ref` or `Handle` are referencing an object within the current .igz file, you can click on their name to focus/jump to the referenced object.
+
+- Likewise, the references (parents) of objects are listed at the bottom of every object view. You can click on any of their name to focus/jump to the corresponding parent object.
+
+### Additional infos
 Depending on their type, detailed informations are available when hovering the name and type of properties.
 
 <a name="explorer"></a>

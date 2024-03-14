@@ -131,6 +131,15 @@ function createMainWindow() {
                     }
                 },
                 {
+                    label: 'Update referenceCount on save',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-refcount', true),
+                    click: (e) => {
+                        store.set('menu-toggle-refcount', e.checked)
+                        win.webContents.send('menu-toggle-refcount', e.checked)
+                    }
+                },
+                {
                     type: 'separator'
                 },
                 {

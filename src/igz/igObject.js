@@ -1,4 +1,5 @@
-import { BufferView } from "../utils.js"
+import { TYPES_METADATA, VSC_METADATA } from "../app/components/utils/metadata.js"
+import { BufferView, computeHash } from "../utils.js"
 
 const igListHeaderSize = 40
 
@@ -22,6 +23,9 @@ class igObject {
 
         this.children = []
         this.references = []
+        this.referenceCount = 0    // Reference count (using refCounted)
+        this.dynamicObject = false // Dynamic object? (contains MetaObject)
+        this.invalid = null        // null | string (reason)
     }
 
     isListType() {
@@ -126,12 +130,50 @@ class igObject {
         }
     }
 
-    isDynamicType() {
-        return [
-            'Object',
-            'CVscComponentData',
-            'CDotNetEntityComponentData_1',
-        ].includes(this.type)
+    /**
+     * Get the fields metadata for this object.
+     * If the object is dynamic (contains an igMetaObject named _meta)
+     * it will try to load the dynamic object's additional fields.
+     * 
+     * @param {IGZ} igz - The parent igz instance
+     * @returns {Array} - An array of fields metadata
+     */
+    getFieldsMetadata(igz) {
+        let fields = TYPES_METADATA[this.type]
+        
+        if (fields == null) {
+            console.warn('No metadata data found for type:', this.type)
+            return []
+        }
+
+        const metaObject = fields.find(e => e.refType == 'igMetaObject')
+
+        if (metaObject?.name == '_meta') {
+            const inRNEX = igz.fixups.RNEX?.data.includes(this.offset + metaObject.offset)
+            
+            if (inRNEX) {
+                const id = this.view.readUInt(metaObject.offset)
+                const [name, file] = igz.named_externals[id]
+
+                let metaFields = TYPES_METADATA[name] ?? TYPES_METADATA[file + '.' + name]
+                
+                if (metaFields == null && name.endsWith('Data')) {
+                    metaFields = VSC_METADATA[computeHash(file)]
+                    if (metaFields) {
+                        metaFields = fields.concat(metaFields.map(e => ({ ...e, offset: e.offset + metaObject.offset + 8})))
+                    }
+                }
+
+                if (metaFields == null) console.warn('Dynamic object not found:', this.name, name, file)
+
+                if (metaFields != null && metaFields.length > fields.length) {
+                    fields = metaFields
+                    this.dynamicObject = true
+                }
+            }
+        }
+
+        return fields
     }
 
     toString() {

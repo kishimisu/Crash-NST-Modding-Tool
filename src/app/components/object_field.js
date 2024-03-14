@@ -155,25 +155,32 @@ class ObjectField {
 
         let input = null
 
-        if (this.isMemoryType())                              this.createMemoryInput(cell)
-        else if (this.children != null && this.collapsable)   this.createCollapsableInput(cell)
-        else if (this.type == 'igRawRefMetaField')            this.createRawRefInput(cell)
-        else if (this.type == 'igFloatMetaField')     input = this.createFloatInput()
-        else if (this.type == 'igBoolMetaField')      input = this.createCheckboxInput()
-        else if (this.type == 'igEnumMetaField')      input = this.createEnumInput()
-        else if (this.type == 'igObjectRefMetaField') input = this.createObjectRefInput()
-        else if (this.type == 'igHandleMetaField')    input = this.createHandleInput()
-        else if (this.isIntegerType())                input = this.createIntegerInput()
-        else if (this.isMultiFloatType())             input = this.createMultiFloatInput()
-        else if (this.isStringType())                 input = this.createStringInput()
-        else input = this.createIntegerInput()
+        try {
+            if (this.isMemoryType())                              this.createMemoryInput(cell)
+            else if (this.children != null && this.collapsable)   this.createCollapsableInput(cell)
+            else if (this.type == 'igRawRefMetaField')            this.createRawRefInput(cell)
+            else if (this.type == 'igFloatMetaField')     input = this.createFloatInput()
+            else if (this.type == 'igBoolMetaField')      input = this.createCheckboxInput()
+            else if (this.type == 'igEnumMetaField')      input = this.createEnumInput()
+            else if (this.type == 'igObjectRefMetaField') input = this.createObjectRefInput()
+            else if (this.type == 'igHandleMetaField')    input = this.createHandleInput()
+            else if (this.isIntegerType())                input = this.createIntegerInput()
+            else if (this.isMultiFloatType())             input = this.createMultiFloatInput()
+            else if (this.isStringType())                 input = this.createStringInput()
+            else input = this.createIntegerInput()
 
-        if (input) {
-            if (!this.input) {
-                this.input = input
-                input.onchange ??= () => this.onChange(input.value)
+            if (input) {
+                if (!this.input) {
+                    this.input = input
+                    input.onchange ??= () => this.onChange(input.value)
+                }
+                cell.appendChild(input)
             }
-            cell.appendChild(input)
+        } catch (e) {
+            cell.innerText = '### Error ###'
+            cell.style.color = '#ff6341'
+            cell.title = e.message
+            console.warn('Error creating input cell:', this, e)
         }
 
         return cell
@@ -600,26 +607,6 @@ class ObjectField {
         else if (this.isDropdownType())
         {
             previous_value = object.view.readInt(offset)
-
-            // Update object reference count for igObjectRefMetaField
-            if (this.type == 'igObjectRefMetaField' && file_types[computeHash(Main.igz.path)] == 'igx_entities') {
-                const currentObject = Main.igz.findObject(previous_value)
-                const newObject     = Main.igz.findObject(value)
-                if (currentObject != null && newObject != null) {
-                    const index = currentObject.references.indexOf(object)
-                    if (index > -1) {
-                        const currentValue = currentObject.view.readUInt(8)
-                        const newValue     = newObject.view.readUInt(8)
-                        currentObject.view.setUInt(currentValue - 1, 8)
-                        newObject.view.setUInt(newValue + 1, 8)
-                        updateState(currentObject, 0, currentValue, currentValue - 1)
-                        updateState(newObject, 0, newValue, newValue + 1)
-                    }
-                    else console.warn('Object reference not found:', currentObject, object)
-                }
-                else console.warn('Object not found:', previous_value, value)
-            }
-
             object.view.setInt(value, offset)
             new_value = value
             update_input = false

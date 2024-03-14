@@ -490,7 +490,12 @@ function onNodeLoadChildren(node, resolve, _tree) {
 
     if (node.type == 'object') {
         const object = igz.objects[node.objectIndex]
-        children = object.children.map(e => e.object.toNodeTree(false, [], object.name))
+        children = object.children
+
+        if (object.type == 'igVscMetaObject') // (vsc files) Always display igVscDataMetaObject as first child of igVscMetaObject
+            children = children.sort((a, b) => a.object.type == 'igVscDataMetaObject' ? -1 : 1)
+
+        children = children.map(e => e.object.toNodeTree(false, [], object.name))
     }
     else if (node.type == 'fixup') {
         const fixup = igz.fixups[node.fixup]

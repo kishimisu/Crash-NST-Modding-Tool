@@ -199,12 +199,20 @@ class igObject {
         let text = this.getName()
         let children = this.children.length > 0
 
-        if (children && this.inNodeTree) // Lazy load children
+        if (children && this.inNodeTree) { // Lazy load children
             children = true
-        else if (children && recursive)  // Load children
-            children = this.index == 0 ? null : this.children.map(e => e.object.toNodeTree(true, parentObjects.slice(), this.name))
+        }
+        else if (children && recursive) {  // Fully load children
+            if (this.index == 0) children = null
+            else  {
+                children = this.children
 
-        this.inNodeTree = true
+                if (this.type == 'igVscMetaObject') // (vsc files) Always display igVscDataMetaObject as first child of igVscMetaObject
+                    children = children.sort((a, b) => a.object.type == 'igVscDataMetaObject' ? -1 : 1)
+                
+                children = children.map(e => e.object.toNodeTree(true, parentObjects.slice(), this.name))
+            }
+        }
 
         // Shorten name if it starts with parent name
         if (parentName && parentName != '' && this.nameID != -1) {
@@ -216,6 +224,8 @@ class igObject {
                 if (text.endsWith('_gen')) text = text.slice(0, -4)
             }
         }
+
+        this.inNodeTree = true
 
         return {
             type: 'object',

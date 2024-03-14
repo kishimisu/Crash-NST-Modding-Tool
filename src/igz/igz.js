@@ -373,51 +373,13 @@ class IGZ {
         if (this.fixups.ROFS == null) return
         const rofs = this.fixups.ROFS.data.map(e => this.getGlobalOffset(e))
 
-        for (const object of this.objects) {
-            const fields = { object: [], memory: [] }
-
-            let metadata = object.getFieldsMetadata(this)
-
-            metadata.forEach(e => {
-                if (e.type == 'igObjectRefMetaField') {
-                    fields.object.push(e)
-                } 
-                else if (e.type == 'igMemoryRefMetaField' || e.type == 'igVectorMetaField') {
-                    fields.memory.push(e)
-                }
-                else if (e.type == 'igObjectRefArrayMetaField') {
-                    const count = e.size / 8
-                    for (let i = 0; i < count; i++) {
-                        fields.object.push({ offset: e.offset + i * 8, refCounted: e.refCounted })
-                    }
-                }
-                else if (e.type == 'igHandleMetaField') {
-                    const handle = object.view.readUInt(e.offset)
-                    const offsetROFS = object.offset + e.offset
-                    const isActive = this.fixups.RHND?.data.includes(offsetROFS)
-                    const isHandle = handle & 0x80000000
-
-                    // Check that field is active and is a handle (EXNM and not EXID)
-                    if (isActive && isHandle) {
-                        const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
-
-                        const ref = this.objects.find(e => e.name == name)
-                        if (ref != null && ref != object) {
-                            object.children.push({ object: ref, offset: e.offset })
-                            ref.references.push(object)
-                        }
-                    }
-                }
-            })
-
-            const addChild = (offset, offsetROFS, refCounted = true) => {
-                if (offset == 0 || !rofs.includes(offsetROFS)) return
-
-                const child = this.findObject(offset)
-
+        for (const object of this.objects) 
+        {
+            const addChild = (child, refCounted = false) => 
+            {
                 if (child != null && child != object) {
                     if (!object.children.some(e => e.object == child)) {
-                        object.children.push({ object: child, offset: offsetROFS - object.global_offset })
+                        object.children.push({ object: child, offset: 1e7 })
                         child.references.push(object)
                     }
                     if (refCounted) 
@@ -425,29 +387,72 @@ class IGZ {
                 }
             }
 
-            // Add igObjectRefs
-            for (const ref of fields.object) {
-                const offset = object.view.readUInt(ref.offset)
-                addChild(offset, object.global_offset + ref.offset, ref.refCounted)
-            }
-
-            // Add igObjectRefs from igMemoryRefs and igVectors
-            for (const ref of fields.memory) {
-                if (ref.memType != 'igObjectRefMetaField' && ref.memType != 'DotNetDataMetaField') continue
-
-                const offset = object.view.readUInt(ref.offset)
-                if (offset == 0) continue
+            const addObjectRef = (offset, offsetROFS, refCounted = true) => {
+                if (offset == 0 || !rofs.includes(offsetROFS)) return
 
                 const child = this.findObject(offset)
+                addChild(child, refCounted)
+            }
 
-                if (child != null) {
-                    const isMemoryRef = ref.type == 'igMemoryRefMetaField'
-                    const {data, dataOffset, active} = object.extractMemoryData(this, ref.offset + (isMemoryRef ? 0 : 8), 8)
-                    if (active) {
-                        data.forEach((offset, i) => addChild(offset, dataOffset + i * 8, ref.refCounted))
+            const addHandle = (handle, offsetRHND) => {
+                const isHandle = handle & 0x80000000
+                if (!isHandle) return
+
+                const isActive = this.fixups.RHND?.data.includes(offsetRHND)
+                if (!isActive) return
+                const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
+
+                const child = this.objects.find(e => e.name == name)
+                addChild(child)
+            }
+
+            const metadata = object.getFieldsMetadata(this)
+
+            metadata.forEach(field => 
+            {
+                if (field.type == 'igObjectRefMetaField') 
+                {
+                    const offset = object.view.readUInt(field.offset)
+                    const globalOffsetROFS = object.global_offset + field.offset
+                    addObjectRef(offset, globalOffsetROFS, field.refCounted)
+                }
+                else if (field.type == 'igHandleMetaField') 
+                {
+                    const handle = object.view.readUInt(field.offset)
+                    const offsetRHND = object.offset + field.offset
+                    addHandle(handle, offsetRHND)
+                }
+                else if (field.type == 'igObjectRefArrayMetaField') 
+                {
+                    const count = field.size / 8
+                    for (let i = 0; i < count; i++) {
+                        const offset = object.view.readUInt(field.offset + i * 8)
+                        const globalOffsetROFS = object.global_offset + field.offset + i * 8
+                        addObjectRef(offset, globalOffsetROFS, field.refCounted)
                     }
                 }
-            }
+                else if (field.type == 'igMemoryRefMetaField' || field.type == 'igVectorMetaField') 
+                {
+                    if (field.memType == 'igObjectRefMetaField' || 
+                        field.memType == 'DotNetDataMetaField'  || 
+                        field.memType == 'igHandleMetaField') {
+
+                        const memoryStart = field.type == 'igMemoryRefMetaField' ? 0 : 8
+                        const {data, offset, global_offset, active} = object.extractMemoryData(this, field.offset + memoryStart, 8)
+
+                        if (active) {
+                            data.forEach((e, i) => {
+                                if (field.memType == 'igHandleMetaField') {
+                                    addHandle(e, offset + i * 8)
+                                }
+                                else {
+                                    addObjectRef(e, global_offset + i * 8, field.refCounted)
+                                }
+                            })
+                        }
+                    }
+                }
+            })
         }
 
         // Update reference count
@@ -457,8 +462,10 @@ class IGZ {
             if (ref != object.referenceCount) {
                 if (updateReferenceCount) 
                     object.view.setUInt(object.referenceCount, 8)
-                else 
+                else {
                     object.invalid = 'Invalid reference count'
+                    console.warn('Invalid reference count for ' + object.getName() + ': ' + ref + ' != ' + object.referenceCount)
+                }
             }
         })
     }
@@ -660,7 +667,7 @@ class IGZ {
                 new_root.push({
                     text: `${type} (${objects.length})`,
                     type: 'type-group',
-                    children: objects.map(e => e.toNodeTree(recursive))
+                    children: objects.map(e => e.toNodeTree(recursive)).sort((a, b) => a.text.localeCompare(b.text))
                 })
             })
 
@@ -668,12 +675,14 @@ class IGZ {
             if (singleChildren.length > 0)
                 root.push({
                     text: (new_root.length > 0 ? 'Other Objects' : rootText) + ` (${singleChildren.length})`,
-                    children: singleChildren.map(e => e.toNodeTree(recursive))
+                    children: singleChildren.map(e => e.toNodeTree(recursive)).sort((a, b) => a.text.localeCompare(b.text))
                 })
         }
         else if (unreferenced.length == 0) {
             root = [{text: 'No Objects'}]
         }
+
+        root = root.sort((a, b) => a.text.localeCompare(b.text))
         
         if (vscRoot) {
             root = [

@@ -151,16 +151,6 @@ class Main {
         })
     }
 
-    // Focus an object in the main IGZ tree view
-    static focusObject(objectIndex) {
-        const node = tree.available().find(e => e.type == 'object' && e.objectIndex === objectIndex)
-        if (node) {
-            node.expandParents()
-            node.focus()
-            node.select()
-        }
-    }
-
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree(tree_ = tree) {
         const defaultColor = '#fefefe'
@@ -314,6 +304,18 @@ class Main {
             ipcRenderer.send('set-progress-bar', null)
             ipcRenderer.send('show-error-message', 'An error occurred while loading the level explorer', e.message)
             throw e
+        }
+    }
+    
+    // Focus an object in the main IGZ tree view
+    static focusObject(objectIndex) {
+        const node = tree.available().find(e => e.type == 'object' && e.objectIndex === objectIndex)
+        console.log(objectIndex, node)
+        if (node) {
+            node.expandParents()
+            node.focus()
+            node.select()
+            return node
         }
     }
 
@@ -776,6 +778,11 @@ function cloneObject() {
             Main.setNodeUpdatedStateIGZ(e, true)
         }
     })
+
+    if (Main.levelExplorer.initialized) {
+        Main.levelExplorer.init()
+        Main.levelExplorer.focusObject(Main.igz.objects[firstID])
+    }
 }
 
 // Revert a .pak file to its original content

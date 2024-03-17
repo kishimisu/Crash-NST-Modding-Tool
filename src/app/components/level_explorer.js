@@ -18,21 +18,21 @@ class LevelExplorer {
         this.initialized = false
         this.mode = 'level' // level, model
 
-        elm('#focus-in-explorer').addEventListener('click', () => {
-            const object = Main.objectView.object
-            
-            if (!this.initialized) this.init()
-            else this.toggleVisibility(true)
+        elm('#focus-in-explorer').addEventListener('click', () => this.focusObject(Main.objectView.object))
+    }
 
-            const match = this.scene.children.find(e => e.userData?.igz == Main.igz.path && e.userData?.objectIndex == object.index)
+    focusObject(object) {
+        if (!this.initialized) this.init()
+        else this.toggleVisibility(true)
 
-            if (match) {
-                this.cam.position.set(match.position.x, match.position.y + 100, match.position.z - 200)
-                this.cam.lookAt(match.position)
-                this.transformControls.attach(match)
-                this.renderer.render(this.scene, this.cam)
-            }
-        })
+        const match = this.scene.children.find(e => e.userData?.igz == Main.igz.path && e.userData?.objectIndex == object.index)
+
+        if (match) {
+            this.cam.position.set(match.position.x, match.position.y + 100, match.position.z - 200)
+            this.cam.lookAt(match.position)
+            this.transformControls.attach(match)
+            this.renderer.render(this.scene, this.cam)
+        }
     }
 
     toggleVisibility(visible) {
@@ -155,10 +155,13 @@ class LevelExplorer {
     }
 
     init() {
+        console.log(this.initialized)
         if (!this.initialized) {
             if (!this.renderer) this.initRenderer()
             this.scene = new Scene()
             this.cam = new PerspectiveCamera(75, canvas.width / canvas.height, 1, 50000)
+            this.cam.position.set(-40, 600, -1000)
+            this.cam.rotation.set(0, Math.PI, 0)
 
             this.transformControls = new TransformControls(this.cam, this.renderer.domElement)
             this.transformControls.setMode('translate')
@@ -257,7 +260,6 @@ class LevelExplorer {
             const fog = new FogExp2(0x2661ab, 0.00004)
             this.scene.fog = fog
 
-            this.initialized = true
             this.render()
         }
 
@@ -286,10 +288,8 @@ class LevelExplorer {
         d2.position.set(-.2, -.9, .3)
         this.scene.add(d2)
 
+        this.transformControls.detach()
         this.scene.add(this.transformControls)
-
-        this.cam.position.set(-40, 600, -1000)
-        this.cam.rotation.set(0, Math.PI, 0)
 
         const modelFiles = []
         const mapFiles   = []
@@ -339,12 +339,17 @@ class LevelExplorer {
             const validObjects = []
 
             for (const object of objects) {
-                const lowername = object.name.toLowerCase()
-                if (!showGrass && lowername.includes('grass')) continue
-                if (!show_all_objects && hidden_objects.some(e => lowername.includes(e))) continue
-                if (!show_all_objects && object.references.some(e => hidden_objects.some(h => e.name.toLowerCase().includes(h)))) continue
-                const result = callback(igz, object)
-                if (result) validObjects.push(result)
+                try {
+                    const lowername = object.name.toLowerCase()
+                    if (!showGrass && lowername.includes('grass')) continue
+                    if (!show_all_objects && hidden_objects.some(e => lowername.includes(e))) continue
+                    if (!show_all_objects && object.references.some(e => hidden_objects.some(h => e.name.toLowerCase().includes(h)))) continue
+                    const result = callback(igz, object)
+                    if (result) validObjects.push(result)
+                }
+                catch (e) {
+                    console.warn('Error processing object', object.name, e)
+                }
             }
             return validObjects
         }
@@ -365,21 +370,25 @@ class LevelExplorer {
             const title = 'Loading level files...'
             ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
 
-            const igz = IGZ.fromFileInfos(file)
-            igz.setupChildrenAndReferences()
+            let igz = Main.igz
+
+            if (igz == null || igz.path != file.path) {
+                igz = IGZ.fromFileInfos(file)
+                igz.setupChildrenAndReferences()
+            }
             
             const igEntities        = processObjects(igz, 'igEntity', this.process_igEntity)
             const CEntities         = processObjects(igz, 'CEntity', this.process_CEntity)
             const CGameEntities     = processObjects(igz, 'CGameEntity', this.process_CGameEntity)
-            const CPhysicalEntities = processObjects(igz, 'CPhysicalEntity', this.process_CPhysicalEntity)
+            // const CPhysicalEntities = processObjects(igz, 'CPhysicalEntity', this.process_CPhysicalEntity)
             const CPlayerStartEntity = processObjects(igz, 'CPlayerStartEntity', this.process_CPlayerStartEntity)
             const CActors            = processObjects(igz, 'CActor', this.process_CActor)
-            const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPhysicalEntities).concat(CPlayerStartEntity).concat(CActors)
+            const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPlayerStartEntity).concat(CActors)//.concat(CPhysicalEntities)
 
             loaded.igEntities.push(...igEntities)
             loaded.CEntities.push(...CEntities)
             loaded.CGameEntities.push(...CGameEntities)
-            loaded.CPhysicalEntities.push(...CPhysicalEntities)
+            // loaded.CPhysicalEntities.push(...CPhysicalEntities)
             loaded.CPlayerStartEntities.push(...CPlayerStartEntity)
             loaded.CActors.push(...CActors)
 
@@ -409,9 +418,10 @@ class LevelExplorer {
             else {
                 ipcRenderer.send('set-progress-bar', null)
                 const position = loaded.CPlayerStartEntities.find(e => e.name.toLowerCase().includes('playerstartall'))?.position
-                if (position != null)
+                if (position != null && !this.initialized)
                     this.cam.position.set(position[0], position[1] + 200, position[2] - 300)
                 this.renderer.render(this.scene, this.cam)
+                this.initialized = true
             }
         }
 

@@ -6,11 +6,12 @@ import igObject from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
 
-import { TYPES_METADATA, namespace_hashes, file_types, VSC_METADATA } from '../app/components/utils/metadata.js'
+import { namespace_hashes, file_types } from '../app/components/utils/metadata.js'
 
 
 const IGZ_VERSION      = 10
 const IGZ_SIGNATURE    = 0x49475A01
+const CUSTOM_SIGNATURE = 0xAABBCCDD
 
 class IGZ {
     constructor(igz_data, path) {
@@ -108,10 +109,12 @@ class IGZ {
         /// Objects (Chunk 1) ///
 
         const global_offsets = this.fixups.RVTB.data.map(offset => this.getGlobalOffset(offset))
+        const last_chunk = this.chunk_infos[this.chunk_infos.length - 1]
+        const last_offset = last_chunk.offset + last_chunk.size
 
         for (let i = 0; i < global_offsets.length; i++) {
             const global_offset = global_offsets[i]
-            const size = (global_offsets[i + 1] ?? buffer.length) - global_offset
+            const size = (global_offsets[i + 1] ?? last_offset) - global_offset
 
             const rvtb_offset = this.fixups.RVTB.data[i]
             const relative_offset = rvtb_offset & 0x7ffffff
@@ -165,11 +168,127 @@ class IGZ {
             types_count[object.type] = count + 1
             object.typeCount = count
         })
+
+        /// Read custom data ///
+
+        const lastChunk = this.chunk_infos[this.chunk_infos.length - 1]
+        reader.seek(lastChunk.offset + lastChunk.size)
+
+        if (reader.offset < buffer.byteLength) {
+            const signature = reader.readUInt(reader.offset)
+            if (signature == CUSTOM_SIGNATURE) {
+                this.custom_file = true
+                this.objects.forEach(e => e.custom = reader.readByte() == 1)
+                console.log('Custom .igz file detected !')
+            }
+        }
+
+        this.setupFixups()
+    }
+
+    /**
+     * Clone an object and update every fixup and igObjectRef accordingly
+     * 
+     * @param {igObject} object - The object to clone
+     */
+    cloneObject(object) {
+        const createClone = (object) => {
+            const clone = object.clone(this)
+            const index = this.objects.length - 2
+            const lastObject = this.objects[index]
+            clone.offset = lastObject.offset + 4
+            clone.global_offset = lastObject.global_offset + 4
+            this.objects = this.objects.slice(0, index + 1).concat(clone, this.objects.slice(index + 1))
+            return clone
+        }
+
+        const clone = createClone(object)
+
+        if (clone.nameID != -1) {
+            const length = this.objectList.getList().length
+            this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(clone.name))
+            this.objectList.fixups.ROFS.push(0x28 + 8 * (length))
+            this.nameList.fixups.RSTT.push(0x28 + 16 * (length))
+        }
+        const igComponentList = clone.tryGetChild('igComponentList')
+        if (igComponentList != null) {
+            const igClone = createClone(igComponentList)
+            const childIndex = clone.children.findIndex(e => e.object == igComponentList)
+            clone.children[childIndex].object = igClone
+
+            const objectRefIndex = clone.objectRefs.findIndex(e => e.child == igComponentList)
+            clone.objectRefs[objectRefIndex].child = igClone
+
+            const parentIndex = igClone.references.findIndex(e => e == igComponentList)
+            igClone.references[parentIndex] = clone
+
+            this.updateObjects([clone, igClone])
+        }
+        else 
+            this.updateObjects([clone])
+    }
+
+    /**
+     * Update every fixup and igObjectRef after adding a new object
+     * 
+     * @param {igObject} newObject - The new object
+     */
+    updateObjects(newObjects = []) {
+        let namedObjects = this.objectList.getList().map((e) => this.findObject(e))
+                               .concat(newObjects.filter(e => e.nameID != -1))
+
+        this.objectList.size += newObjects.length * 8
+        
+        // Update objects offsets
+        const sorted_objects = this.objects.sort((a, b) => a.offset - b.offset)
+        for (let i = 1; i < sorted_objects.length; i++) {
+            const object = sorted_objects[i]
+            const offset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
+
+            // Align to 16 bytes
+            object.offset = offset % 16 == 0 ? offset : offset + 16 - (offset % 16)
+        }
+
+        // Update igObjectRefs
+        for (const object of this.objects) {
+            for (const {child, relative_offset, offset} of object.objectRefs) {
+                object.view.setUInt(child.offset + relative_offset, offset)
+            }
+        }
+
+        // Update igObjectList + igNameList
+        this.objectList.updateList(namedObjects.map(e => e.offset))
+        this.nameList.updateList(namedObjects.map(e => this.fixups.TSTR.data.indexOf(e.name)))
+
+        // Update fixups
+        Object.keys(this.fixups).forEach(fixup => {
+            const updateMethod = this['build' + fixup]
+            if (updateMethod == null) return
+            const data = updateMethod.bind(this)()
+            if (data.length != this.fixups[fixup].data.length) console.log('Updated fixup size for ' + fixup + ' from ' + this.fixups[fixup].data.length + ' to ' + data.length)
+            this.fixups[fixup].updateData(data)
+        })
+
+        // Update chunk infos
+        this.chunk_infos[0].size = Object.values(this.fixups).reduce((a, b) => a + b.size, 0)
+        this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
+        this.chunk_infos[1].size = this.nameList.offset + this.nameList.size
+
+        // Update global offsets
+        this.objects.forEach((object, i) => {
+            object.global_offset = this.getGlobalOffset(object.offset)
+            object.index = i
+        })
+
+        // Update references
+        this.setupChildrenAndReferences('root', true)
     }
 
     save(filePath) {
+        this.setupChildrenAndReferences('root', true)
+
         // Calculate file size
-        const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0)
+        const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0) + this.objects.length + 4
 
         // Write full header
         const buffer = new Uint8Array(this.header.concat(new Array(fileSize - this.header.length).fill(0)))
@@ -187,9 +306,14 @@ class IGZ {
         const objects_start = this.chunk_infos[1].offset
         writer.seek(objects_start)
         this.objects.forEach(e => {
-            if (writer.offset - objects_start != e.offset) console.warn('Offset mismatch: ' + (writer.offset - objects_start) + ' != ' + e.offset)
+            writer.seek(objects_start + e.offset)
+            if (e.offset % 4 != 0) throw new Error('Unaligned offset: ' + e.offset)
             e.save(writer, objects_start)
         })
+
+        // Write custom data
+        writer.setInt(CUSTOM_SIGNATURE)
+        this.objects.forEach(e => writer.setByte(e.custom ? 1 : 0))
 
         this.updated = false
         this.objects.forEach(e => e.updated = false)
@@ -241,8 +365,6 @@ class IGZ {
 
         // Remove duplicates
         all_paths = Array.from(new Set(all_paths))
-
-        // console.log({tstr, tdep, exnm, deps, all_names, all_paths})
 
         return all_paths
     }
@@ -309,35 +431,7 @@ class IGZ {
         const chunk_info = this.objects[1]
         chunk_info.updatePKG(chunk_info_data)
 
-        // Update objects offsets
-        const sorted_objects = this.objects.sort((a, b) => a.offset - b.offset)
-        for (let i = 1; i < sorted_objects.length; i++) {
-            const object = sorted_objects[i]
-            const prevEndOffset = sorted_objects[i - 1].offset + sorted_objects[i - 1].size
-
-            if (object.offset != prevEndOffset) {
-                const diff = prevEndOffset - object.offset
-                object.offset += diff
-                object.global_offset += diff
-                console.log('Updated start offset for ' + object.getName() + ' from ' + object.offset + ' to ' + prevEndOffset + ' (' + diff + ')')
-            }
-        }
-
-        // Update igObjectList + igNameList
-        const namedObjects = this.objectList.getList().map(off => this.objects.find(e => e.offset == off)).filter(e => e != null)
-        this.objectList.updateList(namedObjects.map(e => e.offset))
-        this.nameList.updateList(namedObjects.map(e => this.fixups.TSTR.data.indexOf(e.name)))
-
-        // Update fixups
-        this.fixups.RVTB.updateData(this.buildRVTB())
-        this.fixups.ONAM.updateData(this.buildONAM())
-        this.fixups.ROFS.updateData(this.buildROFS())
-        this.fixups.RSTT.updateData(this.buildRSTT())
-
-        // Update chunk infos
-        this.chunk_infos[0].size = Object.values(this.fixups).reduce((a, b) => a + b.size, 0)
-        this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
-        this.chunk_infos[1].size = this.objects.reduce((a, b) => a + b.size, 0)
+        this.updateObjects()
 
         return this.save()
     }
@@ -350,28 +444,10 @@ class IGZ {
         for (const object of this.objects) {
             object.children = []
             object.references = []
+            object.objectRefs = []
             object.referenceCount = 0 // Reference count (as per refCounted)
             object.invalid = null
         }
-
-        if (mode == 'alchemist') {
-            // Simple (broken) children detection like the Alchemist does
-            for (const object of this.objects) {
-                for (let k = 0; k < object.size; k += 4) {
-                    const offset = object.view.readUInt(k)
-                    if (offset == 0) continue
-                    const child = this.objects.find(e => e.offset == offset)
-                    if (child != null && child != object) {
-                        object.children.push({ object: child, offset: k })
-                        child.references.push(object)
-                    }
-                }
-            }
-            return
-        }
-
-        if (this.fixups.ROFS == null) return
-        const rofs = this.fixups.ROFS.data.map(e => this.getGlobalOffset(e))
 
         for (const object of this.objects) 
         {
@@ -387,18 +463,22 @@ class IGZ {
                 }
             }
 
-            const addObjectRef = (offset, offsetROFS, refCounted = true) => {
-                if (offset == 0 || !rofs.includes(offsetROFS)) return
+            const addObjectRef = (offset, parentObject, relativeParentOffset, refCounted = true) => {
+                if (offset == 0 || !parentObject.fixups.ROFS.includes(relativeParentOffset)) return
 
                 const child = this.findObject(offset)
                 addChild(child, refCounted)
+
+                if (child.offset != offset) console.warn('Invalid object ref', object.getName(), + child.offset + ' != ' + offset)
+
+                parentObject.objectRefs.push({ child, relative_offset: offset - child.offset, offset: relativeParentOffset })
             }
 
-            const addHandle = (handle, offsetRHND) => {
+            const addHandle = (handle, parentObject, relativeParentOffset) => {
                 const isHandle = handle & 0x80000000
                 if (!isHandle) return
 
-                const isActive = this.fixups.RHND?.data.includes(offsetRHND)
+                const isActive = parentObject.fixups.RHND.includes(relativeParentOffset)
                 if (!isActive) return
                 const [name, file] = this.named_handles[handle & 0x3FFFFFFF]
 
@@ -410,43 +490,46 @@ class IGZ {
 
             metadata.forEach(field => 
             {
-                if (field.type == 'igObjectRefMetaField') 
-                {
+                if (field.type == 'igObjectRefMetaField') {
                     const offset = object.view.readUInt(field.offset)
-                    const globalOffsetROFS = object.global_offset + field.offset
-                    addObjectRef(offset, globalOffsetROFS, field.refCounted)
+                    addObjectRef(offset, object, field.offset, field.refCounted)
                 }
-                else if (field.type == 'igHandleMetaField') 
-                {
+                else if (field.type == 'igHandleMetaField') {
+                    if (mode == 'alchemist') return
                     const handle = object.view.readUInt(field.offset)
-                    const offsetRHND = object.offset + field.offset
-                    addHandle(handle, offsetRHND)
+                    addHandle(handle, object, field.offset)
                 }
-                else if (field.type == 'igObjectRefArrayMetaField') 
-                {
+                else if (field.type == 'igRawRefMetaField') {
+                    if (object.fixups.ROFS.includes(field.offset)) {
+                        const offset = object.view.readUInt(field.offset)
+                        object.objectRefs.push({ child: object, relative_offset: offset - object.offset, offset: field.offset })
+                    }
+                }
+                else if (field.type == 'igObjectRefArrayMetaField') {
                     const count = field.size / 8
                     for (let i = 0; i < count; i++) {
                         const offset = object.view.readUInt(field.offset + i * 8)
-                        const globalOffsetROFS = object.global_offset + field.offset + i * 8
-                        addObjectRef(offset, globalOffsetROFS, field.refCounted)
+                        addObjectRef(offset, object, field.offset + i * 8, field.refCounted)
                     }
                 }
-                else if (field.type == 'igMemoryRefMetaField' || field.type == 'igVectorMetaField') 
-                {
-                    if (field.memType == 'igObjectRefMetaField' || 
-                        field.memType == 'DotNetDataMetaField'  || 
-                        field.memType == 'igHandleMetaField') {
+                else if (field.type == 'igMemoryRefMetaField' || field.type == 'igVectorMetaField') {
+                    const memoryStart = field.type == 'igMemoryRefMetaField' ? 0 : 8
+                    const {data, relative_offset, parent, active} = object.extractMemoryData(this, field.offset + memoryStart, 8)
 
-                        const memoryStart = field.type == 'igMemoryRefMetaField' ? 0 : 8
-                        const {data, offset, global_offset, active} = object.extractMemoryData(this, field.offset + memoryStart, 8)
+                    if (active) {
+                        object.objectRefs.push({ child: parent, relative_offset, offset: field.offset + memoryStart + 8 })
 
-                        if (active) {
-                            data.forEach((e, i) => {
+                        if (field.memType == 'igObjectRefMetaField' || 
+                            field.memType == 'DotNetDataMetaField'  || 
+                            field.memType == 'igHandleMetaField') {
+
+                            data.forEach((value, i) => {
                                 if (field.memType == 'igHandleMetaField') {
-                                    addHandle(e, offset + i * 8)
+                                    if (mode == 'alchemist') return
+                                    addHandle(value, parent, relative_offset + i * 8)
                                 }
                                 else {
-                                    addObjectRef(e, global_offset + i * 8, field.refCounted)
+                                    addObjectRef(value, parent, relative_offset + i * 8, field.refCounted)
                                 }
                             })
                         }
@@ -460,8 +543,10 @@ class IGZ {
             const ref = object.view.readUInt(8)
 
             if (ref != object.referenceCount) {
-                if (updateReferenceCount) 
+                if (updateReferenceCount) {
+                    console.log('Updated reference count for ' + object.getName() + ' from ' + ref + ' to ' + object.referenceCount)
                     object.view.setUInt(object.referenceCount, 8)
+                }
                 else {
                     object.invalid = 'Invalid reference count'
                     console.warn('Invalid reference count for ' + object.getName() + ': ' + ref + ' != ' + object.referenceCount)
@@ -535,54 +620,55 @@ class IGZ {
 
         this.fixups.EXID.data = new_exid
     }
-
+    
+    setupFixups() {
+        for (const object of this.objects) {
+            object.fixups = {}
+            const addFixup = (name) => {
+                object.fixups[name] = []
+                if (this.fixups[name] == null) return
+                for (let offset of this.fixups[name].data) {
+                    offset = this.getGlobalOffset(offset)
+                    if (offset >= object.global_offset + object.size) break
+                    if (offset >= object.global_offset) {
+                        object.fixups[name].push(offset - object.global_offset)
+                    }
+                }
+            }
+            ['RSTT', 'RHND', 'ROFS', 'RNEX', 'REXT', 'RPID'].forEach(addFixup)
+        }
+    }
+    
     buildONAM() {
-        return [ this.objects.find(e => e.type == 'igNameList').offset ]
+        return [ this.nameList.offset ]
     }
 
     buildRVTB() {
         return this.objects.map(e => e.offset)
     }
 
-    buildROFS() {
-        const mandatory_offsets = {
-            'igObjectList': [0x20],
-            'igNameList': [0x20],
-            'igStreamingChunkInfo': [0x38],
-        }
-        const rofs = []
-
-        for (const entry of this.objects) {
-            const offsets = entry.children
-                            .filter(e => entry.type == 'igObjectList')
-                            .map(e => e.offset)
-
-                            .concat(mandatory_offsets[entry.type] ?? [])
-                            .map(e => e + entry.offset)
-                            .sort((a, b) => a - b)
-
-            rofs.push(...offsets)
-        }
-
-        return rofs
+    buildRSTT() {
+        return this.objects.map(e => e.fixups.RSTT.map(offset => e.offset + offset)).flat()
     }
 
-    buildRSTT() {
-        const rstt = []
+    buildRHND() {
+        return this.objects.map(e => e.fixups.RHND.map(offset => e.offset + offset)).flat()
+    }
 
-        const chunk_info = this.objects.find(e => e.type == 'igStreamingChunkInfo')
-        if (chunk_info) {
-            const file_count = this.fixups.TSTR.data.filter(e => e.includes('.')).length
-            for (let i = 0; i < file_count * 2; i++) {
-                rstt.push(i * 8 + 112)
-            }
-        }
+    buildROFS() {
+        return this.objects.map(e => e.fixups.ROFS.map(offset => e.offset + offset)).flat()
+    }
 
-        for (let i = 0; i < this.nameList.getList().length; i++) {
-            rstt.push(this.nameList.offset + 40 + i * this.nameList.element_size)
-        }
+    buildRNEX() {
+        return this.objects.map(e => e.fixups.RNEX.map(offset => e.offset + offset)).flat()
+    }
 
-        return rstt
+    buildREXT() {
+        return this.objects.map(e => e.fixups.REXT.map(offset => e.offset + offset)).flat()
+    }
+
+    buildRPID() {
+        return this.objects.map(e => e.fixups.RPID.map(offset => e.offset + offset)).flat()
     }
 
     /**
@@ -622,17 +708,35 @@ class IGZ {
      * @returns {igObject[]} List of all root objects
      */
     getRootObjects() {
-        return this.objects.filter(e => e.nameID != -1 && e.references.length == 1 && e.references[0] == this.objectList)
+        const root = []
+
+        for (const object of this.objects) {
+            if (object.nameID != -1 && object.references.length == 1 && object.references[0] == this.objectList) {
+                root.push(object)
+            }
+            else if (object.type == 'CEntity') {
+                const [x, y, z] = object.view.readVector(3, 0x20)
+                if (x == 0 && y == 0 && z == 0) continue
+                root.push(object)
+            }
+        }
+
+        return root
     }
 
     /**
      * Convert the IGZ file to a tree structure for UI display
      */
-    toNodeTree(recursive = true, mode = 'root') {
+    toNodeTree(recursive = true, mode = 'root') {        
+        let rootText = 'Root Objects'
+        let root = this.objects
+        
+        if (mode == 'root' || mode == 'alchemist') root = this.getRootObjects()
+        else if (mode == 'named') root = this.objects.filter(e => e.nameID != -1)
+
+        const custom_objects = this.objects.filter(e => e.custom && e.references.some(r => !r.custom))
         const unreferenced = this.objects.filter(e => e.references.length == 0)
         const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
-        let root = mode == 'all' ? this.objects.filter(e => e.nameID != -1) : this.getRootObjects()
-        let rootText = 'Root Objects'
 
         this.objects.forEach(e => e.inNodeTree = false)
 
@@ -660,7 +764,7 @@ class IGZ {
                 const objects = objectsPerType[type]
 
                 if (objects.length == 1) {
-                    singleChildren.push(objects[0])
+                    if (!objects[0].custom) singleChildren.push(objects[0])
                     return null
                 }
 
@@ -697,6 +801,13 @@ class IGZ {
         },
             ...root
         ]
+
+        if (custom_objects.length > 0) {
+            tree.push({
+                text: `Custom Objects (${custom_objects.length})`,
+                children: custom_objects.map(e => e.toNodeTree())
+            })
+        }
 
         if (unreferenced.length > 0) {
             tree.push({

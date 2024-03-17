@@ -152,7 +152,7 @@ function createMainWindow() {
             label: 'Level Explorer',
             submenu: [
                 {
-                    label: 'Open Level Explorer',
+                    label: 'Load/Reload Level Explorer',
                     accelerator: 'CmdOrCtrl+E',
                     click: () => win.webContents.send('menu-open-explorer'),
                 },

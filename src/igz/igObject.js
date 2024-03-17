@@ -4,7 +4,7 @@ import { BufferView, computeHash } from "../utils.js"
 const igListHeaderSize = 40
 
 class igObject {
-    constructor({index, offset, global_offset, chunk_info, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = []}) {
+    constructor({index, offset, global_offset, chunk_info, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = [], updated = false, custom = false}) {
         this.index = parseInt(index) // Order of appearance in RVTB fixup
         this.offset = offset               // Offset relative to chunk 1
         this.global_offset = global_offset // Offset relative to file start
@@ -26,6 +26,40 @@ class igObject {
         this.referenceCount = 0    // Reference count (using refCounted)
         this.dynamicObject = false // Dynamic object? (contains MetaObject)
         this.invalid = null        // null | string (reason)
+        this.updated = updated
+        this.custom = custom
+    }
+
+    clone(igz) {
+        const fields = this.getFieldsMetadata(igz)
+        const sizeMetadata = fields[fields.length - 1].offset + fields[fields.length - 1].size
+        const sizeMTSZ = igz.fixups.MTSZ.data[this.typeID]
+        const size = this.dynamicObject ? sizeMetadata : sizeMTSZ
+
+        const object = new igObject({
+            chunk_info: this.chunk_info,
+            size: size,
+            type: this.type,
+            typeID: this.typeID,
+            name: this.name,
+            nameID: this.nameID,
+            data: this.data.slice(0, size),
+            custom: true,
+            updated: true
+        })
+
+        if (this.nameID != -1) object.name += '_cloned'
+        
+        const fixups = {}
+        Object.entries(this.fixups).forEach(([key, value]) => {
+            fixups[key] = this.fixups[key].filter(e => e < size)
+        })
+        object.fixups = JSON.parse(JSON.stringify(fixups))
+        object.children   = this.children.map(e => ({ ...e }))
+        object.references = this.references.map(e => ({ ...e }))
+        object.objectRefs = this.objectRefs.map(e => ({ ...e }))
+
+        return object
     }
 
     isListType() {
@@ -64,9 +98,11 @@ class igObject {
         
         const count = list.length
         const data_size = count * this.element_size
+        // console.log('Updating list:', this.getName(), this.size, '->', igListHeaderSize + data_size, {old: this.getList(), new: list})
 
-        this.view = new BufferView(this.data)
         this.size = igListHeaderSize + data_size
+        this.data = new Uint8Array(this.size).map((e, i) => i < this.data.length ? this.data[i] : 0)
+        this.view = new BufferView(this.data)
 
         this.view.setInt(count, 16)
         this.view.setInt(count, 20)
@@ -82,8 +118,9 @@ class igObject {
     updatePKG(files) {
         if (this.type !== 'igStreamingChunkInfo') throw new Error('Invalid object type: ' + this.type)
 
-        const new_data = new Uint8Array(64 + files.length * 16)
+        this.fixups.RSTT = []
 
+        const new_data = new Uint8Array(64 + files.length * 16)
         new_data.set(this.data.slice(0, 64))
 
         let view = new BufferView(new_data)
@@ -92,8 +129,10 @@ class igObject {
 
         view.seek(64)
         for (let [id, id2] of files) {
+            this.fixups.RSTT.push(view.offset)
             view.setInt(id)
             view.setInt(0)
+            this.fixups.RSTT.push(view.offset)
             view.setInt(id2)
             view.setInt(0)
         }
@@ -117,9 +156,9 @@ class igObject {
 
     save(writer, chunk0_offset) {
         if (this.data.length != this.size) throw new Error('Data size mismatch: ' + this.data.length + ' != ' + this.size)
+        if (this.offset != writer.offset - chunk0_offset) throw new Error('Invalid list offset: ' + this.offset + ' != ' + (writer.offset - chunk0_offset))
 
         if (this.isListType()) {
-            this.offset = writer.offset - chunk0_offset
             const new_offset   = this.offset + igListHeaderSize
             this.view.setInt(new_offset, 32)
         }
@@ -149,7 +188,7 @@ class igObject {
         const metaObject = fields.find(e => e.refType == 'igMetaObject')
 
         if (metaObject?.name == '_meta') {
-            const inRNEX = igz.fixups.RNEX?.data.includes(this.offset + metaObject.offset)
+            const inRNEX = this.fixups.RNEX.includes(metaObject.offset)
             
             if (inRNEX) {
                 const id = this.view.readUInt(metaObject.offset)
@@ -164,7 +203,7 @@ class igObject {
                     }
                 }
 
-                if (metaFields == null) console.warn('Dynamic object not found:', this.name, name, file)
+                // if (metaFields == null) console.warn('Dynamic object not found:', this.name, name, file)
 
                 if (metaFields != null && metaFields.length > fields.length) {
                     fields = metaFields

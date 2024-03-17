@@ -43,9 +43,8 @@ igObject.prototype.getTransform = function() {
 igObject.prototype.getModel = function(igz) {
     let model_offset = this.type == 'CActorData' ? 0x98 : this.type == 'CModelComponentData' ? 0x18 : 0x48
     
-    const hasModel = igz.fixups.RSTT?.data.includes(this.offset + model_offset)
-    const hasSkin  = igz.fixups.RSTT?.data.includes(this.offset + model_offset + 8)
-
+    const hasModel = this.fixups.RSTT.includes(model_offset)
+    const hasSkin  = this.fixups.RSTT.includes(model_offset + 8)
     
     if (hasSkin) {
         const index = this.view.readUInt(model_offset + 8)
@@ -113,7 +112,7 @@ igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
     return {
         data, 
         active,
-        offset: object.offset + startOffset, 
-        global_offset: object.global_offset + startOffset
+        parent: object,
+        relative_offset: startOffset,
     }
 }

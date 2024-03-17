@@ -222,7 +222,8 @@ class Main {
                 }
                 else {
                     children[0].style.color = typeColor
-                    if (children[1]) children[1].style.color = ''
+                    if (children[1]) children[1].style.color = object.custom ? '#b1ffd0' : ''
+                    else if (object.custom) children[0].style.color = '#b1ffd0'
                 }
                 if (object.invalid != null) {
                     children[0].style.color = 'red'
@@ -345,7 +346,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.19 - '
+        const title = 'The Apprentice v1.20 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -661,7 +662,6 @@ function savePAK(filePath)
 // Save current igz to a .igz file
 function saveIGZ(filePath) 
 {
-    igz.setupChildrenAndReferences('root', (localStorage.getItem('save-refcount') ?? 'true') === 'true')
     igz.save(filePath)
     localStorage.setItem('last_file', filePath)
 
@@ -676,8 +676,6 @@ function saveIGZ(filePath)
 function updateIGZWithinPAK() 
 {
     const igzFile = pak.files[Main.lastFileIndex]
-
-    igz.setupChildrenAndReferences('root', (localStorage.getItem('save-refcount') ?? 'true') === 'true')
 
     igzFile.data = igz.save()
     igzFile.size = igzFile.data.length
@@ -759,6 +757,25 @@ async function importToPAK() {
     firstImport.expandParents()
     firstImport.select()
     firstImport.focus()
+}
+
+// Clone the currently focused object in the IGZ tree
+function cloneObject() {
+    if (Main.igz == null || Main.objectView == null) return
+
+    const firstID = Main.igz.objects.length - 1
+
+    Main.saveTreeExpandedState()
+    Main.igz.cloneObject(Main.objectView.object)
+    Main.showIGZTree()
+    Main.restoreTreeExpandedState()
+
+    Main.focusObject(firstID)
+    Main.tree.available().forEach(e => {
+        if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
+            Main.setNodeUpdatedStateIGZ(e, true)
+        }
+    })
 }
 
 // Revert a .pak file to its original content
@@ -907,7 +924,7 @@ function toggleEndian(bigEndian) {
  * Toggle whether to save the referenceCount on igz save
  */
 function toggleSaveReferenceCount(saveReferenceCount) {
-    localStorage.setItem('save-refcount', saveReferenceCount)
+    localStorage.setItem('toggle-refcount', saveReferenceCount)
 }
 
 /**
@@ -1124,6 +1141,9 @@ async function main()
         Main.colorizeMainTree()
     })
     elm('#select-display-mode').value = localStorage.getItem('display-mode') ?? 'root'
+
+    // (IGZ view) Clone object
+    elm('#object-clone').addEventListener('click', () => cloneObject())
 
     if (localStorage.getItem('first_launch') == null) {
         localStorage.setItem('first_launch', false)

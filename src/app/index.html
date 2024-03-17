@@ -24,6 +24,7 @@
                 <label for="select-display-mode">Display mode:</label>
                 <select id="select-display-mode">
                     <option value="root">Root objects</option>
+                    <option value="named">Named objects</option>
                     <option value="all">All objects</option>
                     <option value="alchemist">Alchemist</option>
                 </select>
@@ -60,12 +61,13 @@
             </div>
 
             <!-- Fields View Header -->
-            <div id="objects-fields-title" style="display: none; justify-content: space-between;">
+            <div id="objects-fields-title">
                 <div id="apply-all">
                     <label for="apply-all-checkbox">Apply changes to all search results?</label>
                     <input type="checkbox" id="apply-all-checkbox" />
                 </div>
-                <button id="focus-in-explorer">Focus in explorer</button>
+                <button class="object-button" id="object-clone">Clone</button>
+                <button class="object-button" id="focus-in-explorer">Focus in explorer</button>
             </div>
 
             <!-- Fields View -->

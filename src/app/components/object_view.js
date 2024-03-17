@@ -358,7 +358,7 @@ class ObjectView {
                     // Skip invalid keys
                     // TODO: Include missing types fixup lookup
                     if (keys.field.isStringType(keys.field.memType)) {
-                        if (!Main.igz.fixups.RSTT?.data.includes(keys.object.offset + keyOffset)) continue
+                        if (!keys.object.fixups.RSTT.includes(keyOffset)) continue
                     }
                     else if (keys.field.isIntegerType(keys.field.memType) && key >>> 0 == 0xFAFAFAFA) continue
                     else if (key == 0) continue

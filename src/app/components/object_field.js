@@ -310,8 +310,7 @@ class ObjectField {
     createStringInput() {
         const tstr = Main.igz.fixups.TSTR?.data ?? []
         const tstr_index = this.object.view.readInt(this.offset)
-        const offset = this.object.offset + this.offset
-        const inRSTT = Main.igz.fixups.RSTT?.data.includes(offset)
+        const inRSTT = this.object.fixups.RSTT.includes(this.offset)
         const input = this.createCustomListInput([tstr], inRSTT ? tstr[tstr_index] : null)
 
         // TODO: Entry should be added to RSTT if it's not there
@@ -344,9 +343,9 @@ class ObjectField {
 
     createObjectRefInput() {
         const offs = this.object.offset + this.offset
-        const inROFS = Main.igz.fixups.ROFS?.data.includes(offs)
-        const inRNEX = Main.igz.fixups.RNEX?.data.includes(offs)
-        const inREXT = Main.igz.fixups.REXT?.data.includes(offs)
+        const inROFS = this.object.fixups.ROFS.includes(this.offset)
+        const inRNEX = this.object.fixups.RNEX.includes(this.offset)
+        const inREXT = this.object.fixups.REXT.includes(this.offset)
 
         this.colorized = inROFS || inRNEX || inREXT
         let input
@@ -372,8 +371,10 @@ class ObjectField {
             const inheritedClasses = getAllInheritedChildren(this.refType).add(this.refType)
             let names = Main.igz.objects.filter(e => !this.refType || inheritedClasses.has(e.type)).map(e => e.getDisplayName())
             
-            if (!names.includes(refObject?.getDisplayName()))
+            if (inROFS && !names.includes(refObject?.getDisplayName())) {
+                console.warn('Object hierarchy mismatch:', offset, refObject?.getDisplayName())
                 names = Main.igz.objects.map(e => e.getDisplayName())
+            }
             
             input = this.createCustomListInput([names], refObject?.getDisplayName())
             input.onchange = () => {
@@ -395,7 +396,7 @@ class ObjectField {
     createHandleInput() {
         const exid = Main.igz.fixups.EXID?.data ?? []
 
-        const inRHND = Main.igz.fixups.RHND?.data.includes(this.object.offset + this.offset)
+        const inRHND = this.object.fixups.RHND.includes(this.offset)
         const index = this.object.view.readInt(this.offset) >>> 0
         const isHandle = index & 0x80000000
 

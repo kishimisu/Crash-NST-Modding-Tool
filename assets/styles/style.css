@@ -396,6 +396,12 @@ td.hex-flash {
   text-align: center;
 }
 
+#objects-fields-title {
+  display: none; 
+  justify-content: space-between; 
+  gap: 5px;
+}
+
 #apply-all {
   display: flex;
   align-items: center;
@@ -407,21 +413,24 @@ td.hex-flash {
   width: 100%;
 }
 
-#focus-in-explorer {
-  display: none;
+.object-button {
   white-space: nowrap;
   height: fit-content;
   background: #191919;
   border: none;
   color: #fefefe;
-  padding: 5px;
+  padding: 5px 10px;
   margin-bottom: 5px;
   cursor: pointer;
   font-family: Chivo;
 }
 
-#focus-in-explorer:hover {
+.object-button:hover {
   background: #333;
+}
+
+#focus-in-explorer { 
+  display: none;
 }
 
 /* Tree Preview */

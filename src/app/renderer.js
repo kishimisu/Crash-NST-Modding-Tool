@@ -310,7 +310,7 @@ class Main {
     // Focus an object in the main IGZ tree view
     static focusObject(objectIndex) {
         const node = tree.available().find(e => e.type == 'object' && e.objectIndex === objectIndex)
-        console.log(objectIndex, node)
+        this.hideStructView()
         if (node) {
             node.expandParents()
             node.focus()
@@ -343,12 +343,13 @@ class Main {
         elm('#data-view').style.display = visible ? 'flex' : 'none'
         elm('#object-view-ctn').style.display = visible ? 'block' : 'none'
         elm('#objects-fields-title').style.display = visible ? 'flex' : 'none'
+        if (!visible) this.objectView = null
     }
 
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.20 - '
+        const title = 'The Apprentice v1.21 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -779,9 +780,14 @@ function cloneObject() {
         }
     })
 
+    const object = Main.igz.objects[firstID]
+    Main.objectView = new ObjectView(object)
+    Main.focusObject(firstID)
+
     if (Main.levelExplorer.initialized) {
-        Main.levelExplorer.init()
-        Main.levelExplorer.focusObject(Main.igz.objects[firstID])
+        Main.levelExplorer.addObject(object)
+        if (Main.levelExplorer.visible)
+            Main.levelExplorer.focusObject(object, false)
     }
 }
 

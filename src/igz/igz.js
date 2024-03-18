@@ -209,7 +209,9 @@ class IGZ {
             this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(clone.name))
             this.objectList.fixups.ROFS.push(0x28 + 8 * (length))
             this.nameList.fixups.RSTT.push(0x28 + 16 * (length))
+            this.addHandle(clone.name)
         }
+        
         const igComponentList = clone.tryGetChild('igComponentList')
         if (igComponentList != null) {
             const igClone = createClone(igComponentList)
@@ -226,6 +228,22 @@ class IGZ {
         }
         else 
             this.updateObjects([clone])
+    }
+
+    /**
+     * Adds a handle to the EXNM fixup and named_handles list
+     * 
+     * @param {string} name - Handle name. Must exist in TSTR
+     */
+    addHandle(name) {
+        const file = extractName(this.path)
+        const fileID = this.fixups.TSTR.data.indexOf(file)
+        const objectID = this.fixups.TSTR.data.indexOf(name)
+
+        const exnmData = this.fixups.EXNM.extractData().concat([[objectID, (fileID | 0x80000000) >>> 0]])
+        this.fixups.EXNM.updateData(exnmData)
+        this.fixups.EXNM.data.push([name, 'Handle | ' + file])
+        this.named_handles.push([name, file])
     }
 
     /**

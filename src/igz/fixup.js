@@ -96,30 +96,35 @@ class Fixup {
     }
 
     updateData(data) {
-        let oldData = this.data
-        this.data = data ?? this.data
+        if (data == null) throw new Error(`Cannot update fixup ${this.type}: no data provided`)
 
         let encoded = []
         
         if (this.type === 'TSTR') {
-            for (let i = 0; i < this.data.length; i++) {
-                const str = this.data[i] + '\0' + (this.data[i].length % 2 == 0 ? '\0' : '')
+            for (let i = 0; i < data.length; i++) {
+                const str = data[i] + '\0' + (data[i].length % 2 == 0 ? '\0' : '')
                 encoded = encoded.concat([...str].map(e => e.charCodeAt(0)))
             }
         }
+        else if (this.type === 'EXNM') {
+            encoded = data.flatMap(e => intToBytes(e[0]).concat(intToBytes(e[1])))
+        }
         else if (this.isEncoded()) {
-            encoded = encodeRVTB(this.data)
+            encoded = encodeRVTB(data)
         }
         else if (intFixups.includes(this.type)) {
-            encoded = this.data.map(e => intToBytes(e)).flat()
+            encoded = data.map(e => intToBytes(e)).flat()
         }
         else {
             throw new Error ('Update not implemented: ' + this.type)
         }
 
+        if (this.type != 'EXNM')
+            this.data = data
+        
         this.rawData = this.rawData.slice(0, this.header_size).concat(encoded)
         this.size = this.rawData.length
-        this.item_count = this.data.length
+        this.item_count = data.length
     }
 
     // Get the object corresponding to an offset

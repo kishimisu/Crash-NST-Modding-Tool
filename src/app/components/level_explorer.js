@@ -7,7 +7,6 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { elm, getArchiveFolder } from './utils/utils'
 import IGZ from '../../igz/igz'
 import ObjectView from './object_view'
-import igObject from '../../igz/igObject'
 import { ipcRenderer } from 'electron'
 import { extractModelData } from './utils/model_extract';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
@@ -17,19 +16,22 @@ class LevelExplorer {
         this.visible = false
         this.initialized = false
         this.mode = 'level' // level, model
+        this.models = {}
 
         elm('#focus-in-explorer').addEventListener('click', () => this.focusObject(Main.objectView.object))
     }
 
-    focusObject(object) {
+    focusObject(object, updateCamera = true) {
         if (!this.initialized) this.init()
         else this.toggleVisibility(true)
 
         const match = this.scene.children.find(e => e.userData?.igz == Main.igz.path && e.userData?.objectIndex == object.index)
 
         if (match) {
-            this.cam.position.set(match.position.x, match.position.y + 100, match.position.z - 200)
-            this.cam.lookAt(match.position)
+            if (updateCamera) {
+                this.cam.position.set(match.position.x, match.position.y + 100, match.position.z - 200)
+                this.cam.lookAt(match.position)
+            }
             this.transformControls.attach(match)
             this.renderer.render(this.scene, this.cam)
         }
@@ -39,6 +41,7 @@ class LevelExplorer {
         elm('#explorer').style.display = visible ? 'block' : 'none'
         elm('#data-view').style.height = visible ? '10px' : ''
         this.visible = visible
+        if (!visible) this.deselectObject()
     }
 
     toggleShowSplines(checked) {
@@ -155,7 +158,6 @@ class LevelExplorer {
     }
 
     init() {
-        console.log(this.initialized)
         if (!this.initialized) {
             if (!this.renderer) this.initRenderer()
             this.scene = new Scene()
@@ -170,11 +172,16 @@ class LevelExplorer {
             this.transformControls.addEventListener('objectChange', () => {
                 clearTimeout(timeout)
                 timeout = setTimeout(() => {
-                    const object = this.transformControls.object
-                    if (object) {
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], (-object.position.x).toFixed(3), 0)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object.position.z.toFixed(3), 1)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object.position.y.toFixed(3), 2)
+                    const object3D = this.transformControls.object
+                    if (object3D) {
+                        const object = Main.igz.objects[object3D.userData.objectIndex]
+                        if (Main.objectView?.object != object) {
+                            Main.objectView = new ObjectView(object)
+                            Main.focusObject(object.index)
+                        }
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], (-object3D.position.x).toFixed(3), 0)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object3D.position.z.toFixed(3), 1)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object3D.position.y.toFixed(3), 2)
                     }
                 }, 500)
             })
@@ -249,7 +256,6 @@ class LevelExplorer {
                         const igObject = Main.igz.objects[objectData.objectIndex]
                         Main.objectView = new ObjectView(igObject)
                         Main.focusObject(objectData.objectIndex)
-                        Main.hideStructView()
                     }
                     else {
                         this.transformControls.detach()
@@ -293,9 +299,9 @@ class LevelExplorer {
 
         const modelFiles = []
         const mapFiles   = []
-
         const showGrass = (localStorage.getItem('explorer-show-grass') ?? 'false') === 'true'
 
+        // Find model and map files
         for (const file of Main.pak.files) {
             if (!file.path.endsWith('.igz')) continue
 
@@ -307,9 +313,7 @@ class LevelExplorer {
                 mapFiles.push(file)
         }
 
-        const models = {}
-        const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
-        const hidden_objects = ['cloud', 'shadow', 'palmcluster', 'palmtrees', 'treeplane', 'levelendscene', 'bonusround']
+        this.models = {}
         
         // Create model meshes
         for (let i = 0; i < modelFiles.length; i++) {
@@ -331,10 +335,59 @@ class LevelExplorer {
                 const mesh = this.createMesh(drawCall)
                 group.add(mesh)
             }
-            models[name.replace('.igz', '')] = group
+            this.models[name.replace('.igz', '')] = group
         }
+
+        // Load level files
+        const processNextFile = (index = 0) => {
+            this.renderer.render(this.scene, this.cam)
+
+            const file = mapFiles[index]
+            const title = 'Loading level files...'
+            ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
+
+            let igz = Main.igz
+
+            if (igz == null || igz.path != file.path) {
+                igz = IGZ.fromFileInfos(file)
+                igz.setupChildrenAndReferences()
+            }
+            
+            const { CPlayerStartEntity } = this.process_igz(igz)
+
+            // Set camera start position if PlayerStartAll found
+            const playerStart = CPlayerStartEntity.find(e => e.name.toLowerCase().includes('playerstartall'))?.position
+            if (playerStart != null && !this.initialized)
+                this.cam.position.set(playerStart[0], playerStart[1] + 200, playerStart[2] - 300)
+
+            if (index < mapFiles.length - 1) 
+                processNextFile(index + 1)
+            else {
+                ipcRenderer.send('set-progress-bar', null)
+                this.renderer.render(this.scene, this.cam)
+                this.initialized = true
+            }
+        }
+
+        if (mapFiles.length > 0)
+            processNextFile()
+    }
+
+    addObject(object) {
+        if (!this.initialized) return
+        if (!['igEntity', 'CGameEntity', 'CActor', 'CEntity', 'CPlayerStartEntity'].includes(object.type)) return
         
-        const processObjects = (igz, type, callback) => {
+        const entity = this[`process_${object.type}`](Main.igz, object)
+        this.loadEntity(entity)
+        this.renderer.render(this.scene, this.cam)
+    }
+
+    process_igz(igz) {
+        const showGrass = (localStorage.getItem('explorer-show-grass') ?? 'false') === 'true'
+        const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'
+        const hidden_objects = ['cloud', 'shadow', 'palmcluster', 'palmtrees', 'treeplane', 'levelendscene', 'bonusround']
+
+        const processObjects = (type, callback) => {
             const objects = igz.objects.filter(e => e.type == type)
             const validObjects = []
 
@@ -354,79 +407,20 @@ class LevelExplorer {
             return validObjects
         }
 
-        const loaded = {
-            igEntities: [],
-            CEntities: [],
-            CGameEntities: [],
-            CPhysicalEntities: [],
-            CPlayerStartEntities: [],
-            CActors: []
+        const igEntities         = processObjects('igEntity', this.process_igEntity)
+        const CEntities          = processObjects('CEntity', this.process_CEntity)
+        const CGameEntities      = processObjects('CGameEntity', this.process_CGameEntity)
+        // const CPhysicalEntities = processObjects('CPhysicalEntity', this.process_CPhysicalEntity)
+        const CPlayerStartEntity = processObjects('CPlayerStartEntity', this.process_CPlayerStartEntity)
+        const CActors            = processObjects('CActor', this.process_CActor)
+        const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPlayerStartEntity).concat(CActors)//.concat(CPhysicalEntities)
+
+        // Load entities
+        for (const entity of entities) {
+            this.loadEntity(entity)
         }
 
-        const processNextFile = (index = 0) => {
-            this.renderer.render(this.scene, this.cam)
-
-            const file = mapFiles[index]
-            const title = 'Loading level files...'
-            ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
-
-            let igz = Main.igz
-
-            if (igz == null || igz.path != file.path) {
-                igz = IGZ.fromFileInfos(file)
-                igz.setupChildrenAndReferences()
-            }
-            
-            const igEntities        = processObjects(igz, 'igEntity', this.process_igEntity)
-            const CEntities         = processObjects(igz, 'CEntity', this.process_CEntity)
-            const CGameEntities     = processObjects(igz, 'CGameEntity', this.process_CGameEntity)
-            // const CPhysicalEntities = processObjects(igz, 'CPhysicalEntity', this.process_CPhysicalEntity)
-            const CPlayerStartEntity = processObjects(igz, 'CPlayerStartEntity', this.process_CPlayerStartEntity)
-            const CActors            = processObjects(igz, 'CActor', this.process_CActor)
-            const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPlayerStartEntity).concat(CActors)//.concat(CPhysicalEntities)
-
-            loaded.igEntities.push(...igEntities)
-            loaded.CEntities.push(...CEntities)
-            loaded.CGameEntities.push(...CGameEntities)
-            // loaded.CPhysicalEntities.push(...CPhysicalEntities)
-            loaded.CPlayerStartEntities.push(...CPlayerStartEntity)
-            loaded.CActors.push(...CActors)
-
-            for (const entity of entities) {
-                if (entity == null) continue
-
-                if (entity.name.includes('Collectible_Wumpa'))
-                    entity.model_name = "crash_wumpafruit_no_sparkles"
-                else if (entity.name.includes('Collectible_ExtraLife'))
-                    entity.model_name = "Collectible_Crash_ExtraLife"
-
-                if (entity.model_name == null) {
-                    this.loadModel(null, entity)
-                    continue
-                }
-
-                const model_name = entity.model_name.split('\\').pop().split('/').pop().replace('.igb', '')
-                const model = models[model_name]
-
-                if (model == null) console.warn(`Could not find model ${model_name}`)
-
-                this.loadModel(model?.clone(), entity)
-            }
-
-            if (index < mapFiles.length - 1) 
-                processNextFile(index + 1)
-            else {
-                ipcRenderer.send('set-progress-bar', null)
-                const position = loaded.CPlayerStartEntities.find(e => e.name.toLowerCase().includes('playerstartall'))?.position
-                if (position != null && !this.initialized)
-                    this.cam.position.set(position[0], position[1] + 200, position[2] - 300)
-                this.renderer.render(this.scene, this.cam)
-                this.initialized = true
-            }
-        }
-
-        if (mapFiles.length > 0)
-            processNextFile()
+        return { igEntities, CEntities, CGameEntities, CPlayerStartEntity, CActors }
     }
 
     process_igEntity(igz, object) 
@@ -548,9 +542,25 @@ class LevelExplorer {
         return mesh
     }
 
-    loadModel(model, entity) {
-        let { name, position, rotation, scale, color, parentPosition, controlPoints } = entity
+    loadEntity(entity) {
+        if (entity == null) return
 
+        let { name, model_name, position, rotation, scale, color, parentPosition, controlPoints } = entity
+        let model = null
+
+        if (name.includes('Collectible_Wumpa'))
+            model_name = "crash_wumpafruit_no_sparkles"
+        else if (name.includes('Collectible_ExtraLife'))
+            model_name = "Collectible_Crash_ExtraLife"
+
+        if (model_name != null) {
+            model_name = model_name.split('\\').pop().split('/').pop().replace('.igb', '')
+            model = this.models[model_name]
+
+            if (model == null) console.warn(`Could not find model ${model_name}`)
+            else model = model.clone()
+        }
+        
         if (model == null) {
             const geo = new SphereGeometry(20, 20, 20)
             const mat = new MeshBasicMaterial()

@@ -91,15 +91,15 @@ igObject.prototype.toMeshInfo = function(igz, { color = 0xffffff, transform = {}
 igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
     const data = []
 
-    const memSize = this.view.readUInt(offset)
-    if (memSize == 0) return { data, active: false }
+    const memory_size = this.view.readUInt(offset)
+    if (memory_size == 0) return { data, active: false }
 
     const bitfield = this.view.readUInt(offset + 4)
     const active = ((bitfield >> 0x18) & 0x1) != 0x0
     if (!active) return { data, active: false }
 
     const dataOffset = this.view.readUInt(offset + 8)
-    const elementCount = memSize / elementSize
+    const elementCount = memory_size / elementSize
     const object = igz.findObject(dataOffset)
     const startOffset = igz.getGlobalOffset(dataOffset) - object.global_offset
 
@@ -114,5 +114,6 @@ igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
         active,
         parent: object,
         relative_offset: startOffset,
+        memory_size
     }
 }

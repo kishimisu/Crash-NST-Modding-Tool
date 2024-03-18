@@ -193,25 +193,24 @@ class IGZ {
      */
     cloneObject(object) {
         const createClone = (object) => {
-            const clone = object.clone(this)
             const index = this.objects.length - 2
             const lastObject = this.objects[index]
-            clone.offset = lastObject.offset + 4
-            clone.global_offset = lastObject.global_offset + 4
+            const clone = object.clone(this, lastObject.offset + 4)
             this.objects = this.objects.slice(0, index + 1).concat(clone, this.objects.slice(index + 1))
+
+            if (clone.nameID != -1) {
+                const length = this.objectList.getList().length
+                this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(clone.name))
+                this.objectList.fixups.ROFS.push(0x28 + 8 * (length))
+                this.nameList.fixups.RSTT.push(0x28 + 16 * (length))
+                this.addHandle(clone.name)
+            }
+
             return clone
         }
 
         const clone = createClone(object)
 
-        if (clone.nameID != -1) {
-            const length = this.objectList.getList().length
-            this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(clone.name))
-            this.objectList.fixups.ROFS.push(0x28 + 8 * (length))
-            this.nameList.fixups.RSTT.push(0x28 + 16 * (length))
-            this.addHandle(clone.name)
-        }
-        
         const igComponentList = clone.tryGetChild('igComponentList')
         if (igComponentList != null) {
             const igClone = createClone(igComponentList)
@@ -269,6 +268,9 @@ class IGZ {
 
         // Update igObjectRefs
         for (const object of this.objects) {
+            // child: referenced igObject
+            // relative_offset: offset from referenced igObject start
+            // offset: igObjectRef offset
             for (const {child, relative_offset, offset} of object.objectRefs) {
                 object.view.setUInt(child.offset + relative_offset, offset)
             }
@@ -535,7 +537,7 @@ class IGZ {
                     const {data, relative_offset, parent, active} = object.extractMemoryData(this, field.offset + memoryStart, 8)
 
                     if (active) {
-                        object.objectRefs.push({ child: parent, relative_offset, offset: field.offset + memoryStart + 8 })
+                        object.objectRefs.push({ child: parent, relative_offset, offset: field.offset + memoryStart + 8, type: 'memory' })
 
                         if (field.memType == 'igObjectRefMetaField' || 
                             field.memType == 'DotNetDataMetaField'  || 

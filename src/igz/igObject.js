@@ -30,20 +30,36 @@ class igObject {
         this.custom = custom
     }
 
-    clone(igz) {
+    clone(igz, offset) {
         const fields = this.getFieldsMetadata(igz)
         const sizeMetadata = fields[fields.length - 1].offset + fields[fields.length - 1].size
         const sizeMTSZ = igz.fixups.MTSZ.data[this.typeID]
-        const size = this.dynamicObject ? sizeMetadata : sizeMTSZ
+        const memories = fields.filter(e => e.type == 'igMemoryRefMetaField')
+                               .map(field => ({field, mem_infos: this.extractMemoryData(igz, field.offset)}))
+                               .filter(e => e.mem_infos.active)
+        
+                               let size = this.dynamicObject ? sizeMetadata : sizeMTSZ                 
+        let data = Array.from(this.data.slice(0, size))
+
+        // Copy memory data
+        for (const memory of memories) {
+            const { parent, relative_offset, memory_size } = memory.mem_infos
+            const bytes = parent.view.readBytes(memory_size, relative_offset)
+
+            memory.memory_data_offset = offset + data.length
+            data = data.concat(Array.from(bytes))
+        }
 
         const object = new igObject({
+            data: new Uint8Array(data),
+            size: data.length,
+            offset: offset,
+            global_offset: igz.getGlobalOffset(offset),
             chunk_info: this.chunk_info,
-            size: size,
             type: this.type,
             typeID: this.typeID,
             name: this.name,
             nameID: this.nameID,
-            data: this.data.slice(0, size),
             custom: true,
             updated: true
         })
@@ -54,10 +70,42 @@ class igObject {
         Object.entries(this.fixups).forEach(([key, value]) => {
             fixups[key] = this.fixups[key].filter(e => e < size)
         })
-        object.fixups = JSON.parse(JSON.stringify(fixups))
+        object.fixups = fixups
         object.children   = this.children.map(e => ({ ...e }))
         object.references = this.references.map(e => ({ ...e }))
-        object.objectRefs = this.objectRefs.map(e => ({ ...e }))
+        object.objectRefs = this.objectRefs.filter(e => e.offset < size).map(e => ({ ...e }))
+
+        // Update objectRefs and fixups        
+        for (const {field, memory_data_offset, mem_infos} of memories) {
+            const { parent, relative_offset: relative_parent_offset , memory_size, data } = mem_infos
+            const relative_offset = memory_data_offset - object.offset
+
+            // Update memory ref children
+            if (field.memType == 'igObjectRefMetaField') {
+                for (let i = 0; i < data.length; i++) {
+                    const inROFS = parent.fixups.ROFS.includes(relative_parent_offset + i * 4)
+                    if (!inROFS) continue
+
+                    const ref = data[i]
+                    const child = igz.findObject(ref)
+                    object.objectRefs.push({ child, offset: relative_offset + i * 4, relative_offset: ref - child.offset })
+                    object.fixups.ROFS.push(relative_offset + i * 4)
+                }
+            }
+            else if (field.memType == 'igStringMetaField') {
+                for (let i = 0; i < data.length; i++) {
+                    const inRSTT = parent.fixups.RSTT.includes(relative_parent_offset + i * 4)
+                    if (!inRSTT) continue
+
+                    object.fixups.RSTT.push(relative_offset + i * 4)
+                }
+            }
+
+            // Update memory ref
+            const objectRef = object.objectRefs.find(e => e.offset == field.offset + 8)
+            objectRef.child = object
+            objectRef.relative_offset = relative_offset
+        }
 
         return object
     }

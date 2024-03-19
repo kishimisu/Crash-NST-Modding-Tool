@@ -400,17 +400,12 @@ td.hex-flash {
   display: none; 
   justify-content: space-between; 
   gap: 5px;
+  flex-direction: column;
 }
 
-#apply-all {
+#object-actions {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px;
-  color: rgb(255, 240, 145);
-  font-size: .7rem;
-  font-weight: 200;
-  width: 100%;
+  gap: 5px;
 }
 
 .object-button {
@@ -423,6 +418,7 @@ td.hex-flash {
   margin-bottom: 5px;
   cursor: pointer;
   font-family: Chivo;
+  font-size: .75rem;
 }
 
 .object-button:hover {
@@ -431,6 +427,17 @@ td.hex-flash {
 
 #focus-in-explorer { 
   display: none;
+}
+
+#apply-all {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px;
+  color: rgb(255, 240, 145);
+  font-size: .7rem;
+  font-weight: 200;
+  width: 100%;
 }
 
 /* Tree Preview */

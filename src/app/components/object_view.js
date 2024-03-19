@@ -30,6 +30,7 @@ class ObjectView {
             const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(object.type)
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
             elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
+            elm('#object-rename').style.display = object.nameID == -1 ? 'none' : 'block'
 
             this.findInterestingFields()
             this.createFieldList()

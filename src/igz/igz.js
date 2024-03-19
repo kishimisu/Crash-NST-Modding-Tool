@@ -227,6 +227,33 @@ class IGZ {
         }
         else 
             this.updateObjects([clone])
+
+        this.updated = true
+    }
+
+    /**
+     * Rename an object (update in TSTR)
+     * 
+     * @param {igObject} object 
+     * @param {string} name 
+     */
+    renameObject(object, name) {
+        const tstr = this.fixups.TSTR
+        const nameID = tstr.data.findIndex(name => name == object.name)
+        if (nameID == -1) return console.warn('No TSTR entry found for', object.name)
+
+        // Update TSTR
+        const newTSTR = tstr.data.slice()
+        newTSTR[nameID] = name
+        tstr.updateData(newTSTR)
+        
+        // Update object
+        object.name = name
+        object.nameID = nameID
+        object.updated = true
+
+        this.updated = true
+        this.updateObjects()
     }
 
     /**
@@ -236,6 +263,7 @@ class IGZ {
      */
     addHandle(name) {
         const file = extractName(this.path)
+        if (!this.fixups.TSTR.data.includes(file)) this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(file))
         const fileID = this.fixups.TSTR.data.indexOf(file)
         const objectID = this.fixups.TSTR.data.indexOf(name)
 
@@ -278,7 +306,7 @@ class IGZ {
 
         // Update igObjectList + igNameList
         this.objectList.updateList(namedObjects.map(e => e.offset))
-        this.nameList.updateList(namedObjects.map(e => this.fixups.TSTR.data.indexOf(e.name)))
+        this.nameList.updateList(namedObjects.map(e => [this.fixups.TSTR.data.indexOf(e.name), computeHash(e.name)]).flat())
 
         // Update fixups
         Object.keys(this.fixups).forEach(fixup => {

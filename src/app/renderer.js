@@ -773,7 +773,6 @@ function cloneObject() {
     Main.showIGZTree()
     Main.restoreTreeExpandedState()
 
-    Main.focusObject(firstID)
     Main.tree.available().forEach(e => {
         if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
             Main.setNodeUpdatedStateIGZ(e, true)
@@ -789,6 +788,57 @@ function cloneObject() {
         if (Main.levelExplorer.visible)
             Main.levelExplorer.focusObject(object, false)
     }
+    Main.pak.updated = true
+    Main.updateTitle()
+}
+
+// Rename the currently focused object in the IGZ tree
+function renameObject() {
+    const objName = elm('#object-name')
+    objName.contentEditable = true
+    objName.focus()
+
+    const object = Main.objectView.object
+
+    const onRename = (name) => {
+        name = name.split(':').pop().trim()
+        
+        Main.igz.renameObject(object, name)
+        Main.pak.updated = true
+
+        Main.tree.available().each(node => {
+            if (node.type == 'object' && node.objectIndex == object.index) {
+                node.set('text', object.getName())
+                const children = node.itree.ref.querySelector('.object-node-name').children
+                const nameElm = children[1] ?? children[0]
+                nameElm.innerText = ' ' + name
+                Main.setNodeUpdatedStateIGZ(node, true)
+            }
+        })
+        Main.colorizeMainTree()
+        Main.updateTitle()
+    }
+
+    const onBlur = () => {
+        objName.contentEditable = false
+        objName.innerText = object.getName()
+        objName.removeEventListener('blur', onBlur)
+        objName.removeEventListener('keydown', onKeyDown)
+    }
+    const onKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            onRename(objName.innerText)
+            objName.contentEditable = false
+        }
+        else if (e.key === 'Escape') {
+            e.preventDefault()
+            objName.blur()
+        }
+    }
+
+    objName.addEventListener('keydown', onKeyDown)
+    objName.addEventListener('blur', onBlur)
 }
 
 // Revert a .pak file to its original content
@@ -1157,6 +1207,7 @@ async function main()
 
     // (IGZ view) Clone object
     elm('#object-clone').addEventListener('click', () => cloneObject())
+    elm('#object-rename').addEventListener('click', () => renameObject())
 
     if (localStorage.getItem('first_launch') == null) {
         localStorage.setItem('first_launch', false)

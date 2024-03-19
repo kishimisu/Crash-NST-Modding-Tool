@@ -142,10 +142,11 @@ class igObject {
 
     // Update object list data for igObjectList and igNameList
     updateList(list) {
-        if (!this.isListType()) throw new Error('Invalid object list type: ' + this.type)
+        if (this.type != 'igObjectList' && this.type != 'igNameList') throw new Error('Invalid object list type: ' + this.type)
         
-        const count = list.length
-        const data_size = count * this.element_size
+        const element_size = 8
+        const count = this.type == 'igObjectList' ? list.length : list.length / 2
+        const data_size = list.length * element_size
         // console.log('Updating list:', this.getName(), this.size, '->', igListHeaderSize + data_size, {old: this.getList(), new: list})
 
         this.size = igListHeaderSize + data_size
@@ -157,8 +158,8 @@ class igObject {
         this.view.setInt(data_size, 24)
         // this.view.setInt(offset, 32) // updated on save
 
-        for (let i = 0; i < count; i++) {
-            this.view.setInt(list[i], igListHeaderSize + i * this.element_size)
+        for (let i = 0; i < list.length; i++) {
+            this.view.setInt(list[i], igListHeaderSize + i * element_size)
         }
     }
 

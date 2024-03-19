@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { BufferView, computeHash, extractName } from '../utils.js'
 import Fixup from './fixup.js'
-import igObject from './igObject.js'
+import igObject, { igListHeaderSize } from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
 
@@ -257,6 +257,25 @@ class IGZ {
     }
 
     /**
+     * Delete an object from the igz file. Update igObjectList and igNameList for named objects.
+     * 
+     * @param {igObject} object 
+     */
+    deleteObject(object) {
+        const index = this.objects.indexOf(object)
+        if (index == -1) return console.warn('Object not found:', object.name)
+        
+        if (object.nameID != -1) {
+            this.objectList.fixups.ROFS.pop()
+            this.nameList.fixups.RSTT.pop()
+        }
+
+        this.updated = true
+        this.objects.splice(index, 1)
+        this.updateObjects()
+    }
+
+    /**
      * Adds a handle to the EXNM fixup and named_handles list
      * 
      * @param {string} name - Handle name. Must exist in TSTR
@@ -281,9 +300,10 @@ class IGZ {
     updateObjects(newObjects = []) {
         let namedObjects = this.objectList.getList().map((e) => this.findObject(e))
                                .concat(newObjects.filter(e => e.nameID != -1))
+                               .filter(e => e != null)
 
-        this.objectList.size += newObjects.length * 8
-        
+        this.objectList.size = igListHeaderSize + namedObjects.length * 8
+
         // Update objects offsets
         const sorted_objects = this.objects.sort((a, b) => a.offset - b.offset)
         for (let i = 1; i < sorted_objects.length; i++) {

@@ -325,3 +325,4 @@ class igObject {
 }
 
 export default igObject
+export { igListHeaderSize }

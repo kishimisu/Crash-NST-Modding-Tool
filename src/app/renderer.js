@@ -841,6 +841,27 @@ function renameObject() {
     objName.addEventListener('blur', onBlur)
 }
 
+// Delete the currently focused object in the IGZ tree
+function deleteObject() {
+    const object = Main.objectView.object
+
+    if (object.references.length > 1 || object.references.length == 1 && object.references[0] != Main.igz.objectList) {
+        ipcRenderer.send('show-warning-message', 'This object is referenced by other objects. Please delete parent objects first.')
+        return
+    }
+
+    if (Main.levelExplorer.initialized) {
+        Main.levelExplorer.deleteObject(object)
+    }
+
+    Main.saveTreeExpandedState()
+    Main.igz.deleteObject(object)
+    Main.showIGZTree()
+    Main.lastFileIndex = null
+    Main.restoreTreeExpandedState()
+    Main.showObjectDataView(false)
+}
+
 // Revert a .pak file to its original content
 async function revertPakToOriginal() {
     if (!isGameFolderSet()) return ipcRenderer.send('show-warning-message', 'Game folder not set. You can set it in the Settings menu.')
@@ -1208,6 +1229,7 @@ async function main()
     // (IGZ view) Clone object
     elm('#object-clone').addEventListener('click', () => cloneObject())
     elm('#object-rename').addEventListener('click', () => renameObject())
+    elm('#object-delete').addEventListener('click', () => deleteObject())
 
     if (localStorage.getItem('first_launch') == null) {
         localStorage.setItem('first_launch', false)

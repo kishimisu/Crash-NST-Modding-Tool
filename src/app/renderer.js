@@ -51,8 +51,8 @@ const level_names = levels
 class Main {
     static treeMode = 'pak' // Current main tree mode ('igz' or 'pak')
 
-    static lastCollapsedState = null
-    static lastFileIndex = null
+    static lastCollapsedState = { pak: null, igz: null }
+    static lastFileIndex = { pak: null, igz: null }
 
     static pak = null
     static igz = null
@@ -112,7 +112,7 @@ class Main {
     // Init main tree view for IGZ file
     static showIGZTree() {
         if (igz == null) return
-        if (pak != null) this.saveTreeExpandedState()
+        if (pak != null && this.treeMode == 'pak') this.saveTreeExpandedState('pak')
 
         this.treeMode = 'igz'
         tree.load([]) 
@@ -393,16 +393,22 @@ class Main {
         this.colorizeMainTree()
     }
 
-    static saveTreeExpandedState() {
-        this.lastCollapsedState = tree.available().map(e => e.expanded())
-        this.lastFileIndex = tree.lastSelectedNode()?.fileIndex ?? this.lastFileIndex
+    static saveTreeExpandedState(mode) {
+        const index = mode == 'pak' ? 'fileIndex' : 'objectIndex'
+        const lastNode = tree.lastSelectedNode()
+
+        if (lastNode)
+            this.lastFileIndex[mode] = lastNode[index]
+
+        this.lastCollapsedState[mode] = tree.available().map(e => e.expanded())
     }
 
-    static restoreTreeExpandedState() {
-        if (this.lastCollapsedState == null) return
+    static restoreTreeExpandedState(mode) {
+        if (this.lastCollapsedState[mode] == null) return
         tree.available().forEach((e, i) => {
-            if (this.lastCollapsedState[i]) e.expand()
-            if (e.fileIndex === this.lastFileIndex) {
+            if (this.lastCollapsedState[mode][i]) e.expand()
+            if (this.lastFileIndex[mode] == null) return
+            if (e.fileIndex === this.lastFileIndex[mode] || e.objectIndex == this.lastFileIndex[mode]) {
                 e.focus()
                 e.select()
             }
@@ -678,7 +684,7 @@ function saveIGZ(filePath)
 // Update pak with new igz data
 function updateIGZWithinPAK() 
 {
-    const igzFile = pak.files[Main.lastFileIndex]
+    const igzFile = pak.files.find(e => e.path === igz.path)
 
     igzFile.data = igz.save()
     igzFile.size = igzFile.data.length
@@ -768,10 +774,12 @@ function cloneObject() {
 
     const firstID = Main.igz.objects.length - 1
 
-    Main.saveTreeExpandedState()
+    Main.saveTreeExpandedState('igz')
     Main.igz.cloneObject(Main.objectView.object)
-    Main.showIGZTree()
-    Main.restoreTreeExpandedState()
+    tree.load([]) 
+    tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
+    Main.colorizeMainTree()
+    Main.restoreTreeExpandedState('igz')
 
     Main.tree.available().forEach(e => {
         if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
@@ -854,11 +862,13 @@ function deleteObject() {
         Main.levelExplorer.deleteObject(object)
     }
 
-    Main.saveTreeExpandedState()
+    Main.saveTreeExpandedState('igz')
     Main.igz.deleteObject(object)
-    Main.showIGZTree()
-    Main.lastFileIndex = null
-    Main.restoreTreeExpandedState()
+    tree.load([]) 
+    tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
+    Main.colorizeMainTree()
+    Main.lastFileIndex.igz = null
+    Main.restoreTreeExpandedState('igz')
     Main.showObjectDataView(false)
 }
 
@@ -1040,7 +1050,7 @@ async function main()
     tree.on('node.click', onNodeClick)
     tree.on('node.dblclick', (event, node) => {
         if (node.type === 'file' && node.text.endsWith('.igz')) {
-            Main.lastFileIndex = node.fileIndex
+            Main.lastFileIndex.pak = node.fileIndex
             Main.showIGZTree() // Open IGZ from PAK on double click
         }
     })
@@ -1207,12 +1217,14 @@ async function main()
     elm('#back-pak').addEventListener('click', async () => {
         const confirm = !igz.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
-        const lastIndex = Main.lastFileIndex
+        const lastIndex = Main.lastFileIndex.pak
         pak.updated = false
         Main.showPAKTree()
-        Main.restoreTreeExpandedState()
-        Main.showIGZPreview(lastIndex)    
-        Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+        Main.restoreTreeExpandedState('pak')
+        if (lastIndex != null) {
+            Main.showIGZPreview(lastIndex)    
+            Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+        }
     })
 
     // (IGZ view) Select object display mode

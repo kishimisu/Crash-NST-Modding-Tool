@@ -39,7 +39,7 @@ class LevelExplorer {
 
     toggleVisibility(visible) {
         elm('#explorer').style.display = visible ? 'block' : 'none'
-        elm('#data-view').style.height = visible ? '10px' : ''
+        elm('#data-table-ctn').style.display = visible ? 'none' : 'block'
         this.visible = visible
         if (!visible) this.deselectObject()
     }
@@ -247,7 +247,7 @@ class LevelExplorer {
                             }
 
                             Main.showIGZTree()
-                            Main.lastFileIndex = fileIndex
+                            Main.lastFileIndex.igz = fileIndex
                         }
 
                         object.children?.forEach(e => e.material.color.set(0xeda93b))
@@ -757,7 +757,7 @@ class NoClipControls {
             this.explorer.raycaster.setFromCamera(mouse, this.explorer.cam)
             const intersects = this.explorer.raycaster.intersectObjects(this.explorer.scene.children)
             
-            if (this.explorer.transformControls.object != null && intersects.length > 0 && intersects.some(e => e.object.parent?.parent?.type == "TransformControlsGizmo")) {
+            if (this.explorer.transformControls.object != null && intersects.length > 0 && intersects.some(e => e.object.name != 'DELTA' && e.object.parent?.parent?.type == "TransformControlsGizmo")) {
                 this.clicked = false
                 this.transform = true
             }

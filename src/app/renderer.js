@@ -8,6 +8,7 @@ import jsonLang from 'highlight.js/lib/languages/json'
 
 import IGZ from '../igz/igz.js'
 import Pak from '../pak/pak.js'
+import HavokFile from '../havok/havok.js'
 import FileInfos from '../pak/fileInfos.js'
 import ObjectView from './components/object_view.js'
 import LevelExplorer from './components/level_explorer.js'
@@ -51,11 +52,14 @@ const level_names = levels
 class Main {
     static treeMode = 'pak' // Current main tree mode ('igz' or 'pak')
 
+    // Used to restore the state of the tree view when switching between PAK and IGZ
+    // or when updating the igz tree.
     static lastCollapsedState = { pak: null, igz: null }
     static lastFileIndex = { pak: null, igz: null }
 
     static pak = null
     static igz = null
+    static hkx = null
     static tree = null
 
     static objectView = null  // IGZ Object edit view (right)
@@ -109,28 +113,30 @@ class Main {
         elm('#use-current-pak').parentNode.style.display = 'flex'
     }
 
-    // Init main tree view for IGZ file
-    static showIGZTree() {
-        if (igz == null) return
+    // Init main tree view for IGZ/HKX file
+    static showIGZTree(hkx = false) {
+        if ((this.igz == null && hkx == false) || (this.hkx == null && hkx == true)) return
         if (pak != null && this.treeMode == 'pak') this.saveTreeExpandedState('pak')
 
-        this.treeMode = 'igz'
+        const root = hkx ? this.hkx : this.igz
+        this.treeMode = hkx ? 'hkx' : 'igz'
+
         tree.load([]) 
-        tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
-        if (tree.nodes().length == 3)
-            tree.get(1).expand()
+        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode')))
+        
+        if (hkx || tree.nodes().length == 3) tree.get(1).expand()
 
         clearUpdatedData()
         if (this.objectView) this.showObjectDataView(false)
 
         this.colorizeMainTree()
         this.hideIGZPreview()
-        this.setSyntaxHighlightedCode(igz)
+        this.setSyntaxHighlightedCode(root)
         this.updateTitle()
 
         elm('#pak-import').style.display = 'none'
         elm('#back-pak').style.display = pak == null ? 'none' : 'block'
-        elm('#auto-refresh').checked = igz.objects.length < 500
+        elm('#auto-refresh').checked = root.objects.length < 500
         elm('#use-current-pak').parentNode.style.display = 'none'
         elm('#display-mode').style.display = 'block'
     }
@@ -180,7 +186,8 @@ class Main {
             }
             // IGZ object node
             else if (e.type === 'object') {
-                const object = igz.objects[e.objectIndex]
+                const root = this.igz ?? this.hkx
+                const object = root.objects[e.objectIndex]
                 const title = e.itree.ref.querySelector('.title')
                 const typeColor = randomColor(object.type)
 
@@ -251,6 +258,8 @@ class Main {
         elm('#igz-open').style.display = 'block'
         let showProgress = false
 
+        this.hkx = null
+
         try {
             if (forceReload || igz == null || igz.updated || igz.path !== pak.files[fileIndex].path) {
                 const filePath = pak.files[fileIndex].path
@@ -282,6 +291,21 @@ class Main {
         treePreview.load(igz.toNodeTree(false, localStorage.getItem('display-mode')))
         this.colorizeMainTree(treePreview)
         if (treePreview.nodes().length == 3) treePreview.get(1).expand()
+    }
+
+    static showHKXPreview(fileIndex) {
+        elm('#data-struct').style.overflow = 'visible'
+        elm('#igz-open').style.display = 'block'
+
+        const file = pak.files[fileIndex]
+        const hkx = new HavokFile(file.getUncompressedData(), file.path)
+        
+        this.hkx = hkx
+        this.igz = null
+
+        treePreview.load(hkx.toNodeTree(false, localStorage.getItem('display-mode')))
+        treePreview.get(1).expand()
+        this.colorizeMainTree(treePreview)
     }
 
     // Hide IGZ content preview
@@ -349,13 +373,14 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.21 - '
+        const title = 'The Apprentice v1.23 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
         }
-        else if (this.treeMode === 'igz') {
-            const igz_path = igz.path + (igz.updated ? '*' : '')
+        else {
+            const root = this.treeMode === 'igz' ? this.igz : this.hkx
+            const igz_path = root.path + (root.updated ? '*' : '')
             document.title = title + (pak == null ? igz_path : pak_path + ' -> ' + igz_path)
         }
     }
@@ -438,8 +463,12 @@ function onNodeClick(event, node)
         else if (node.type === 'file') {
             const file = pak.files[node.fileIndex]
 
+            Main.lastFileIndex.pak = node.fileIndex
+
             if (file.path.endsWith('.igz')) 
-                Main.showIGZPreview(node.fileIndex)                
+                Main.showIGZPreview(node.fileIndex)
+            else if (file.path.endsWith('.hkx'))
+                Main.showHKXPreview(node.fileIndex)
             else 
                 Main.hideIGZPreview()
 
@@ -486,6 +515,13 @@ function onNodeClick(event, node)
             if (elm('#search').value == '') {
                 elm('#search').value = object.getName()
             }
+        }
+    }
+    else if (Main.treeMode === 'hkx') {
+        if (node.type === 'object') {
+            const object = Main.hkx.objects[node.objectIndex]
+            Main.hideStructView()
+            Main.objectView = new ObjectView(object)
         }
     }
 }
@@ -1049,9 +1085,15 @@ async function main()
     // Main tree nodes click event
     tree.on('node.click', onNodeClick)
     tree.on('node.dblclick', (event, node) => {
-        if (node.type === 'file' && node.text.endsWith('.igz')) {
-            Main.lastFileIndex.pak = node.fileIndex
-            Main.showIGZTree() // Open IGZ from PAK on double click
+        if (node.type === 'file') {
+            if (node.text.endsWith('.igz')) {
+                Main.lastFileIndex.pak = node.fileIndex
+                Main.showIGZTree() // Open IGZ from PAK on double click
+            }
+            else if (node.text.endsWith('.hkx')) {
+                Main.lastFileIndex.pak = node.fileIndex
+                Main.showIGZTree(true) // Open HKX from PAK on double click
+            }
         }
     })
 
@@ -1104,7 +1146,12 @@ async function main()
     elm('#pak-import').addEventListener('click', () => importToPAK())
 
     // "Open IGZ" button
-    elm('#igz-open').addEventListener('click', () => Main.showIGZTree())
+    elm('#igz-open').addEventListener('click', () => {
+        const lastPath = pak.files[Main.lastFileIndex.pak].path
+
+        if (lastPath.endsWith('.igz'))      Main.showIGZTree()
+        else if (lastPath.endsWith('.hkx')) Main.showIGZTree(true)
+    })
 
     // "Include in package" checkbox
     elm('#include-in-pkg').addEventListener('click', (event) => {
@@ -1141,7 +1188,7 @@ async function main()
 
     // "Clone IGZ" button
     elm('#igz-clone').addEventListener('click', () => {
-        const fileIndex = tree.lastSelectedNode().fileIndex
+        const fileIndex = Main.lastFileIndex.pak
 
         if (fileIndex != null) {
             pak.cloneFile(fileIndex)
@@ -1153,7 +1200,7 @@ async function main()
 
     // "Replace IGZ within PAK" button
     elm('#igz-replace').addEventListener('click', async () => {
-        const fileIndex = tree.lastSelectedNode().fileIndex
+        const fileIndex = Main.lastFileIndex.pak
 
         for (const file of pak.files.filter(e => !e.original)) {
             writeFileSync(getTempFolder(file.id), file.data)
@@ -1170,7 +1217,11 @@ async function main()
             pak.replaceFileWithinPak(fileIndex, newFileIndex)
 
             Main.setSyntaxHighlightedCode(pak.files[fileIndex])
-            Main.showIGZPreview(fileIndex, true)
+            
+            if (pak.files[fileIndex].path.endsWith('.igz'))
+                Main.showIGZPreview(fileIndex, true)
+            else if (pak.files[fileIndex].path.endsWith('.hkx'))
+                Main.showHKXPreview(fileIndex)
 
             const node = tree.lastSelectedNode()
             Main.setNodeToUpdated(node)
@@ -1188,7 +1239,7 @@ async function main()
 
     // "Delete IGZ" button
     elm('#igz-delete').addEventListener('click', () => {
-        const fileIndex = tree.lastSelectedNode().fileIndex
+        const fileIndex = Main.lastFileIndex.pak
 
         if (fileIndex != null) {
             pak.deleteFile(fileIndex)
@@ -1202,28 +1253,36 @@ async function main()
 
     // "Extract IGZ" button
     elm('#igz-extract').addEventListener('click', async () => {
-        const fileIndex = tree.lastSelectedNode().fileIndex
+        const fileIndex = Main.lastFileIndex.pak
 
         if (fileIndex != null) {
-            const data = pak.files[fileIndex].getUncompressedData()
-            const filePath = await ipcRenderer.invoke('save-file', 'igz')
+            const file = pak.files[fileIndex]
+            const data = file.getUncompressedData()
+            const filePath = await ipcRenderer.invoke('save-file', file.path.slice(-3))
             if (filePath == null) return
             writeFileSync(filePath, new Uint8Array(data))
-            console.log('Extracted', pak.files[fileIndex].path)
+            console.log('Extracted', file.path)
         }
     })
 
     // (IGZ view) Back to .pak button
     elm('#back-pak').addEventListener('click', async () => {
-        const confirm = !igz.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Are you sure you want to go back to the PAK file?')
+        const root = Main.treeMode == 'igz' ? 'igz' : 'hkx'
+        const confirm = !root.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
         const lastIndex = Main.lastFileIndex.pak
         pak.updated = false
         Main.showPAKTree()
         Main.restoreTreeExpandedState('pak')
         if (lastIndex != null) {
-            Main.showIGZPreview(lastIndex)    
-            Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+            if (pak.files[lastIndex].path.endsWith('.igz')) {
+                Main.showIGZPreview(lastIndex)    
+                Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+            }
+            else if (pak.files[lastIndex].path.endsWith('.hkx')) {
+                Main.showHKXPreview(lastIndex)
+                Main.setSyntaxHighlightedCode(pak.files[lastIndex])
+            }
         }
     })
 
@@ -1231,9 +1290,10 @@ async function main()
     elm('#display-mode').addEventListener('change', () => {
         const value = elm('#select-display-mode').value
         localStorage.setItem('display-mode', value)
-        igz.setupChildrenAndReferences(value)
+        if (Main.treeMode == 'igz') igz.setupChildrenAndReferences(value)
+        const root = Main.treeMode == 'igz' ? Main.igz : Main.hkx
         tree.load([]) 
-        tree.load(igz.toNodeTree(true, value))
+        tree.load(root.toNodeTree(true, value))
         Main.colorizeMainTree()
     })
     elm('#select-display-mode').value = localStorage.getItem('display-mode') ?? 'root'

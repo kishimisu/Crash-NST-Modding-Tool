@@ -236,7 +236,7 @@ code {
 
 .hex-offset { color: #888; }
 .hex-child  { color: rgb(111, 173, 255); }
-.hex-handle { color: rgb(174 209 255); }
+.hex-mem    { color: rgb(174 209 255); }
 .hex-zero   { color: #666; }
 .hex-vec    { color: rgb(240, 160, 41) }
 .hex-float  { color: #70fff0; }

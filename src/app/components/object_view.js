@@ -1,8 +1,8 @@
 import ObjectField, { clearUpdatedData } from './object_field'
 import { createElm, elm } from "./utils/utils"
-import { bitRead, computeHash, isVectorZero } from '../../utils'
-import { TYPES_METADATA, VSC_METADATA } from './utils/metadata'
+import { bitRead, isVectorZero } from '../../utils'
 import { ipcRenderer } from 'electron'
+import { HAVOK_METADATA } from '../../havok/hkObject'
 
 // Save interesting fields on IGZ load (fields that have 
 // different values between objects of the same type)
@@ -24,33 +24,49 @@ class ObjectView {
         this.selected = null                  // { field, cell }, Currently selected field and cell 
 
         if (init_dom) {
-            elm('#object-name').innerHTML = object.getName().split('_').join('<wbr>_')
-            if (object.invalid) elm('#object-name').innerHTML += ` <span style="color: #ff0000; font-weight: 200">(${object.invalid})</span>`
-
-            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(object.type)
-            const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(object.view.readVector(3, 0x20))
-            elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
-            elm('#object-rename').style.display = object.nameID == -1 ? 'none' : 'block'
-
+            this.initDOM()
             this.findInterestingFields()
             this.createFieldList()
             this.createHexDataCells()
         }
     }
+
+    /**
+     * Updates the object's name and action buttons visibility
+     */
+    initDOM() {
+        elm('#object-name').innerHTML = this.object.getName().split('_').join('<wbr>_')
+        if (this.object.invalid) elm('#object-name').innerHTML += ` <span style="color: #ff0000; font-weight: 200">(${this.object.invalid})</span>`
+        
+        if (Main.treeMode == 'igz') {
+            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(this.object.type)
+            const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(this.object.view.readVector(3, 0x20))
+            elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
+            elm('#object-rename').style.display = this.object.nameID == -1 ? 'none' : 'block'
+        }
+        else if (Main.treeMode == 'hkx') {
+            elm('#focus-in-explorer').style.display = 'none'
+            elm('#object-rename').style.display = 'none'
+        }
+        elm('#object-clone').style.display = Main.treeMode == 'igz' ? 'block' : 'none'
+        elm('#object-delete').style.display = Main.treeMode == 'igz' ? 'block' : 'none'
+    }
     
     /**
      * Converts fields infos to ObjectField instances
-     * and sets their parent and children references.
+     * and clone their parent and children references.
      */ 
     initFields() {
-        // Create fields objects
-        const fields = this.object.getFieldsMetadata(Main.igz)
-                                  .map(e => new ObjectField(e))
+        const fields = Main.treeMode == 'igz'
+            ? this.object.getFieldsMetadata(Main.igz).map(e => new ObjectField(e))
+            : this.object.fields.map(e => new ObjectField(e))
+
         fields.forEach(e => {
             e.object = this.object
             if (e.parent)   e.parent = fields.find(f => f.name === e.parent.name)
             if (e.children) e.children = e.children.map(c => fields.find(f => f.name === c.name))
         })
+
         return fields
     }
 
@@ -108,33 +124,44 @@ class ObjectView {
             }
         }
 
-        let objectSize = Main.igz.fixups.MTSZ.data[this.object.typeID]
+        // Calculate actual object size
+        let objectSize = this.object.size
+        
+        if (Main.treeMode == 'igz') {
+            objectSize = Main.igz.fixups.MTSZ.data[this.object.typeID]
 
-        // Update object size for dynamic objects
-        if (this.object.dynamicObject) {
+            // Update object size for dynamic objects
+            if (this.object.dynamicObject) {
+                const lastField = this.fields.reduce((a, b) => b.offset > a.offset ? b : a)
+                const lastOffset = lastField.offset + lastField.size
+                objectSize = lastOffset + (lastOffset % 4 == 0 ? 0 : 4 - (lastOffset % 4))
+            }
+        }
+        else if (Main.treeMode == 'hkx' && this.fields.length > 0) {
             const lastField = this.fields.reduce((a, b) => b.offset > a.offset ? b : a)
-            const lastOffset = lastField.offset + lastField.size
-            objectSize = lastOffset + (lastOffset % 4 == 0 ? 0 : 4 - (lastOffset % 4))
+            objectSize = lastField.offset + lastField.size
         }
 
+        // Create default fields
         const rowCount = Math.ceil(objectSize / bytesPerRow)
 
-        // Create default fields
         for (let i = 0; i < rowCount; i++) {
             const row = createRow(table, i)
 
             for (let k = 0; k < bytesPerRow; k += 4) {
                 const offset = i * bytesPerRow + k
-                if (offset > objectSize - 4) break
-
-                const value = this.object.view.readInt(offset)
+                const size = Math.min(4, objectSize - offset)
+                if (size <= 0) break
+                const method = {4: 'readInt', 2: 'readInt16', 1: 'readInt8'}[size]
+                const value = this.object.view[method](offset)
                 createCell(row, value, offset)
             }
         }
 
+        // Create memory fields
         let additionalOffset = objectSize + (objectSize % 4 == 0 ? 0 : 4 - (objectSize % 4))
 
-        // Create memory fields
+        if (Main.treeMode == 'igz')
         for (const field of this.fields.filter(e => e.isMemoryType())) {
             if (!field.children.length) continue
 
@@ -198,11 +225,11 @@ class ObjectView {
                 const cell = this.hexCells[Math.floor(field.offset / 4) + j]?.element
                 if (cell == null) continue
                 const isLong = field.isLongType()
-                const method = 'read' + (isLong ? 'Int' : field.getIntegerMethod() ?? 'Int')
+                const method = 'read' + (field.method ?? (isLong ? 'Int' : field.getIntegerMethod() ?? 'Int'))
                 const isMemoryChild = field.parent?.isMemoryType()
                 const object = isMemoryChild ? field.ref_object : this.object
                 const offset = isMemoryChild ? field.ref_data_offset : field.offset
-                const value  = object.view[method](offset + j * 4)  >>> 0
+                const value  = object.view[method](offset + j * 4) >>> 0
                 const isValid = value != 0 && value != 0xFFFFFFFF
                 
                 if ((field.colorized == null && isValid) || (field.colorized === true && (j == 0 || isValid))) {
@@ -231,6 +258,7 @@ class ObjectView {
 
         // Setup MemoryRef & Array fields
         for (const field of this.fields) {
+            // IGZ array fields
             if (field.type == 'igMemoryRefMetaField') {
                 this.setupMemoryRefField(field)
             }
@@ -239,6 +267,13 @@ class ObjectView {
             }
             else if (field.type == 'igObjectRefArrayMetaField') {
                 this.setupObjectRefArrayField(field)
+            }
+            // HKX array fields
+            else if (field.type == 'TYPE_ARRAY') {
+                this.setupHkxArrayField(field, true)
+            }
+            else if (field.type == 'TYPE_RELARRAY') {
+                this.setupHkxArrayField(field, false)
             }
         }
 
@@ -400,9 +435,38 @@ class ObjectView {
         field.refType = null
     }
 
+    setupHkxArrayField(field, memory = true) {
+        const typeData = HAVOK_METADATA.typeInfos[field.memType]
+        if (typeData == null) return console.warn('Unknown type:', field.memType)
+        const { size, method } = typeData
+        const newFields = []
+
+        for (let i = 0; i < field.element_count; i++) {
+            const newField = new ObjectField({
+                name: field.name + ' ' + (i + 1),
+                type: field.memType,
+                refType: field.refType,
+                size: memory ? field.size : size,
+                offset: memory ? field.offset : field.ref_data_offset + i * size,
+                method: method,
+                parent: field,
+                object: this.object,
+                value: field.value[i],
+            })
+            newFields.push(newField)
+        }
+
+        const fieldIndex = this.fields.indexOf(field)
+        this.fields = this.fields.slice(0, fieldIndex + 1).concat(newFields).concat(this.fields.slice(fieldIndex + 1))
+        field.children = newFields
+        field.collapsable = field.element_count > 0
+    }
+
     // Update an object's data when a field is modified
     // Apply changes to all objects if the "Apply to all" checkbox is checked
     onFieldUpdate(field, value, id) {
+        if (Main.treeMode == 'hkx') return ipcRenderer.send('show-warning-message', 'Editing HKX files is not supported yet.')
+
         const searchMatches = Main.tree.matched()
 
         if (elm('#apply-all-checkbox').checked && searchMatches.length > 0) {
@@ -450,9 +514,11 @@ class ObjectView {
 
     // Find fields that have different values between objects
     findInterestingFields() {
+        const root = Main.treeMode == 'igz' ? Main.igz : Main.hkx
+
         // Reset interesting fields on igz change
-        if (interesting_fields.igz !== Main.igz) {
-            interesting_fields.igz = Main.igz
+        if (interesting_fields.igz !== root) {
+            interesting_fields.igz = root
             interesting_fields.fields = {}
         }
         // Load saved interesting fields
@@ -462,7 +528,7 @@ class ObjectView {
         }
 
         // Calculate interesting fields
-        const allObjects = Main.igz.objects.filter(e => e.type == this.object.type)
+        const allObjects = root.objects.filter(e => e.type == this.object.type)
         let interestingFields = []
 
         for (let i = 0; i < this.fields.length; i++) {

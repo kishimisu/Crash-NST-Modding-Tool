@@ -1,7 +1,8 @@
-import { bitRead, bitReplace, computeHash } from "../../utils"
+import { bitRead, bitReplace } from "../../utils"
 import { createElm } from "./utils/utils"
-import { ENUMS_METADATA, file_types, getAllInheritedChildren } from "./utils/metadata"
 import ObjectView from "./object_view"
+import { ENUMS_METADATA, getAllInheritedChildren } from "./utils/metadata"
+import { HAVOK_METADATA } from "../../havok/hkObject"
 
 // Keep track of updated fields within objects
 const updated_data = {}
@@ -11,7 +12,7 @@ const collapsed_fields = JSON.parse(localStorage.getItem('collapsed_fields') ?? 
 
 class ObjectField {
     /**
-     * Instance of a single field in an igObject (ObjectView instance)
+     * Instance of a single field in an igObject/hkObject (ObjectView instance)
      * Manages the creation and update of the field DOM element.
      * Updates the corresponding data in the igObject when the input is changed.
      * 
@@ -38,13 +39,13 @@ class ObjectField {
         this.enumType = props.enumType // (igEnum)            Enum type
         this.elmType  = props.elmType  // (igVectorMetaField) Element type
         
-        this.memType  = props.memType  // (igMemoryRef, igVectorMetaField) Memory type
-        this.element_size  = null      // (igMemoryRef) Size of each element
-        this.element_count = null      // (igMemoryRef, Vec2f, Vec3f, Vec4f, Matrix44f, Quaternionf) Number of elements in the field
-        this.memory_size   = null      // (igMemoryRef) Total size of the memory
-        this.memory_active = false     // (igMemoryRef, igRawRef) Whether the memory is active (known from its bitfield)
-        this.ref_object    = props.ref_object // (igMemoryRef, igRawRef) Object containing the MemoryRef's data
-        this.ref_data_offset = props.ref_data_offset // (igMemoryRef, igRawRef) Data start offset relative to the ref_object
+        this.memType  = props.memType            // (igMemoryRef, igVectorMetaField) Memory type
+        this.element_size  = null                // (igMemoryRef) Size of each element
+        this.memory_size   = null                // (igMemoryRef) Total size of the memory
+        this.element_count = props.element_count // (igMemoryRef, Vec2f, Vec3f, Vec4f, Matrix44f, Quaternionf) Number of elements in the field
+        this.memory_active = props.memory_active ?? false // (igMemoryRef, igRawRef) Whether the memory is active (known from its bitfield)
+        this.ref_object    = props.ref_object             // (igMemoryRef, igRawRef) Object containing the MemoryRef's data
+        this.ref_data_offset = props.ref_data_offset      // (igMemoryRef, igRawRef) Data start offset relative to the ref_object
 
         this.interesting = false    // Whether the field can have multiple values between different objects
 
@@ -56,6 +57,10 @@ class ObjectField {
         this.colorized   = null     // Whether the field is colorized (true, false = force, null = default)
         this.collapsable = props.collapsable || this.bitfieldParent // Whether the field can be collapsed (parent field)
         this.collapsed   = false    // Whether the field is collapsed (parent + children field)
+
+        // HKX specific
+        this.value = props.value   // Optional value read during initialization
+        this.method = props.method // Type specific read/write method
     }
 
     // Create the field DOM element (name, type and input cells)
@@ -141,11 +146,20 @@ class ObjectField {
 
     // Text to display when hovering the type cell
     getTypeTitle() {
+        if (Main.treeMode == 'hkx') return this.getTypeTitleHkx()
         let title = `Type: ${this.type}`
         const additionalType = this.memType ?? this.refType ?? this.enumType
         if (additionalType) title += ' | ' + additionalType
         if (this.bitfield)  title += ` | Bits: ${this.bits}, Shift: ${this.shift}`
         if (this.memory_size) title += ` | Memory Size: ${this.memory_size}`
+        return title
+    }
+
+    getTypeTitleHkx() {
+        let title = `Type: ${this.type}`
+        const additionalType = this.memType ?? this.enumType
+        if (additionalType) title += ' | ' + additionalType
+        if (this.refType) title += ` | ${this.refType}`
         return title
     }
 
@@ -156,8 +170,14 @@ class ObjectField {
         let input = null
 
         try {
-            if (this.isMemoryType())                              this.createMemoryInput(cell)
+            // IGZ/HKX shared input fields
+            if (this.isMemoryType() || this.isMemoryTypeHkx())    this.createMemoryInput(cell)
             else if (this.children != null && this.collapsable)   this.createCollapsableInput(cell)
+
+            // HKX specific input fields
+            else if (Main.treeMode == 'hkx')              input = this.createHkxInput()
+
+            // IGZ specific input fields
             else if (this.type == 'igRawRefMetaField')            this.createRawRefInput(cell)
             else if (this.type == 'igFloatMetaField')     input = this.createFloatInput()
             else if (this.type == 'igBoolMetaField')      input = this.createCheckboxInput()
@@ -184,6 +204,54 @@ class ObjectField {
         }
 
         return cell
+    }
+
+    createHkxInput() {
+        const input = createElm('input')
+        let value = this.value
+
+        if (this.isMultiFloatTypeHkx()) {
+            return this.createMultiFloatInput() 
+        }
+        else if (this.type == 'TYPE_STRINGPTR') {
+            value ??= this.object.view.readUInt(this.offset)
+        }
+        else if (this.refType != null) {
+            if (value == null) value = 'null'
+            else if (HAVOK_METADATA.types[this.refType] == null) {
+                value = 'No metadata'
+                console.warn(`Metadata not found: ${this.refType}`)
+            }
+            else {
+                const object = Main.hkx.objects.find(e => e.offset == value)
+                if (object == null) value = 'Not found: ' + value
+                else {
+                    value = object.getDisplayName()
+                    this.createFocusEvent(object)
+                }
+            }
+        }
+        else if (this.type == 'TYPE_ENUM') {
+            const value = this.object.view['read' + this.method](this.offset)
+            const enums = HAVOK_METADATA.enums[this.enumType]
+
+            if (enums != null) {
+                const names = enums.map(e => e.name)
+                const selected = enums.find(e => e.value == value).name
+                const input = this.createCustomListInput([names], selected, false)
+                this.colorized = ['none', 'invalid', 'default', 'ignore'].every(e => !selected.toLowerCase().includes(e))
+                return input
+            }
+
+            console.warn(`Enum type not found: ${this.enumType}`)
+            input.value = value
+        }
+        else {
+            value ??= this.object.view['read' + this.method](this.offset)
+        }
+
+        input.value = value
+        return input
     }
 
     createCollapsableInput(cell) {
@@ -248,10 +316,10 @@ class ObjectField {
 
     createMultiFloatInput() {
         const div = createElm('div', 'vec-input')
-        const groupBy4 = this.type == 'igMatrix44fMetaField' || this.type == 'igQuaternionfMetaField'
+        const groupBy4 = this.type == 'igMatrix44fMetaField' || this.type == 'igQuaternionfMetaField' || this.type == 'TYPE_TRANSFORM'
 
         if      (this.type == 'igFloatArrayMetaField') div.style.flexDirection = 'column'
-        else if (this.type == 'igMatrix44fMetaField')  div.style.flexWrap = 'wrap'
+        else if (this.type == 'igMatrix44fMetaField' || this.type == 'TYPE_TRANSFORM')  div.style.flexWrap = 'wrap'
 
         this.element_count = this.size / 4
         this.input = []
@@ -733,8 +801,25 @@ class ObjectField {
         ].includes(this.type)
     }
 
+    isMemoryTypeHkx() {
+        return [
+            'TYPE_ARRAY',
+            'TYPE_RELARRAY'
+        ].includes(this.type)
+    }
+
+    isMultiFloatTypeHkx() {
+        return [
+            'TYPE_VECTOR4',
+            'TYPE_QUATERNION',
+            'TYPE_TRANSFORM'
+        ].includes(this.type)
+    }
+
     // Returns the css color class for the field type
     getColorClass() {
+        if (Main.treeMode == 'hkx') return this.getColorClassHkx()
+
         if (this.bitfieldParent) return null
 
         if (this.type == 'igBoolMetaField')      return 'hex-bool'
@@ -744,14 +829,28 @@ class ObjectField {
         if (this.isLongType())                   return 'hex-long'
         if (this.isIntegerType())                return 'hex-int'
         if (this.isMultiFloatType())             return 'hex-vec'
-        if (this.isMemoryType()                  || 
-            this.type == 'igRawRefMetaField')    return 'hex-handle'
-        if (this.isStringType()                  ||
+        if (this.isMemoryType() ||
+            this.type == 'igRawRefMetaField')    return 'hex-mem'
+        if (this.isStringType() ||
             this.type == 'igHandleMetaField')    return 'hex-string'
+    }
+
+    getColorClassHkx() {
+        if (this.type == 'TYPE_BOOL' || this.type == 'TYPE_FLAGS' || 
+            this.type == 'hkBitField')                                 return 'hex-bool'
+        if (this.type == 'TYPE_ENUM')                                  return 'hex-enum'
+        if (this.type == 'TYPE_REAL' || this.type == 'TYPE_HALF')      return 'hex-float'
+        if (this.type == 'TYPE_POINTER' || this.type == 'TYPE_STRUCT') return 'hex-child'
+        if (this.type.includes('INT') || this.type == 'TYPE_SHORT')    return 'hex-int'
+        if (this.isMultiFloatTypeHkx())                                return 'hex-vec'
+        if (this.isMemoryTypeHkx())                                    return 'hex-mem'
+        if (this.type == 'TYPE_STRINGPTR')                             return 'hex-string'
     }
 
     // Return a prettified string version of the field type
     getPrettyType(type) {
+        if (Main.treeMode == 'hkx') return this.getPrettyTypeHkx()
+
         type ??= this.enumType ?? this.refType ?? this.type
 
         if (type == null) return "Type Error"
@@ -770,6 +869,22 @@ class ObjectField {
         else if (!this.refType) type = type.replace(/(?<=[a-z])(?=[A-Z][a-z])/g, ' ')
 
         return type
+    }
+
+    getPrettyTypeHkx() {
+        const isUppercase = (str) => str.split('').every(e => e == e.toUpperCase())
+
+        let type = this.enumType ?? this.memType ?? this.refType ?? this.type
+        type = type.replace('TYPE_', '') // Remove 'TYPE_' prefix
+
+        if (type == 'REAL') type = 'Float' // Real -> Float 
+        else if (isUppercase(type)) type = type[0] + type.slice(1).toLowerCase() // UPPER -> Upper
+
+        // Add memory/list prefix
+        if (this.type == 'TYPE_ARRAY') type = `Memory<${type}>`
+        else if (this.memType != null) type = `List<${type}>`
+
+        return type.replace('ptr', 'Ptr').replace('array', 'Array')
     }
 }
 

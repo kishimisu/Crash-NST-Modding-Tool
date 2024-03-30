@@ -498,8 +498,16 @@ class ObjectView {
         Main.igz.updated = true
         if (Main.pak) Main.pak.updated = true
 
-        Main.updateTitle()
-        Main.colorizeMainTree()
+        if (field.type == 'igObjectRefMetaField' || field.type == 'igHandleMetaField') {
+            Main.igz.updateObjects()
+            Main.reloadTreeIGZ()
+        }
+        else {
+            if (field.isStringType())
+                Main.igz.updateObjects()
+            Main.updateTitle()
+            Main.colorizeMainTree()
+        }
     }
 
     // Sets the hex cells and fields references

@@ -391,10 +391,14 @@ class ObjectField {
         const inRSTT = this.object.fixups.RSTT.includes(this.offset)
         const input = this.createCustomListInput([tstr], inRSTT ? tstr[tstr_index] : null)
 
-        // TODO: Entry should be added to RSTT if it's not there
-        if (!inRSTT) input.disabled = true
+        input.style.color = inRSTT ? '' : '#bbb'
         this.colorized = inRSTT
-        input.onchange = () => this.onChange(Math.max(0, tstr.indexOf(input.value)))
+        input.onchange = () => {
+            const newRSTT = input.value != '--- None ---'
+            this.object.activateFixup('RSTT', this.offset, newRSTT)
+            input.style.color = newRSTT ? '' : '#bbb'
+            this.onChange(Math.max(0, tstr.indexOf(input.value)))
+        }
 
         return input
     }
@@ -456,6 +460,9 @@ class ObjectField {
             input = this.createCustomListInput([names], refObject?.getDisplayName())
             input.onchange = () => {
                 const newObject = Main.igz.objects.find(e => e.getDisplayName() == input.value)
+                const newROFS = newObject != null
+                this.object.activateFixup('ROFS', this.offset, newROFS, newObject, 0)
+                input.style.color = newROFS ? '' : '#bbb'
                 this.onChange(newObject?.offset ?? 0)
                 this.createFocusEvent(newObject)
             }
@@ -465,8 +472,7 @@ class ObjectField {
             }
         }
 
-        // TODO: Entry should be added to the corresponding fixup if it's not there
-        if (!this.colorized) input.disabled = true
+        input.style.color = this.colorized ? '' : '#bbb'
         return input
     }
 
@@ -685,6 +691,7 @@ class ObjectField {
         else if (this.isDropdownType())
         {
             previous_value = object.view.readInt(offset)
+            if (previous_value == 0 && this.isStringType()) previous_value = -1
             object.view.setInt(value, offset)
             new_value = value
             update_input = false

@@ -161,6 +161,17 @@ class Main {
         })
     }
 
+    static reloadTreeIGZ() {
+        if (this.treeMode == 'pak') return
+        const root = this.treeMode === 'igz' ? this.igz : this.hkx
+        this.saveTreeExpandedState(this.treeMode)
+        tree.load([])
+        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode')))
+        this.colorizeMainTree()
+        this.updateTitle()
+        this.restoreTreeExpandedState(this.treeMode)
+    }
+
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree(tree_ = tree) {
         const defaultColor = '#fefefe'
@@ -196,31 +207,33 @@ class Main {
                 const title = e.itree.ref.querySelector('.title')
                 const typeColor = randomColor(object.type)
 
+                const getName = (str) => {
+                    const updated = str.endsWith('*')
+                    return updated ? str.slice(0, -1) : str
+                }
+                const objectName = getName(e.text)
+
                 if (title.children.length == 0) {
-                    const div = createElm('div', 'object-node-name')
-                    const typeElm = createElm('span')
-                    const nameElm = createElm('span')
-                    const sep = e.text.indexOf(':')
-                    let type = e.text, name = ''
+                    const sep = objectName.indexOf(':')
+                    let type = objectName, name = ''
 
                     if (sep != -1) {
-                        type = e.text.slice(0, sep+1)
-                        name = e.text.slice(sep+1)
+                        type = objectName.slice(0, sep+1)
+                        name = objectName.slice(sep+1)
                     }
 
-                    typeElm.innerText = type
-                    nameElm.innerText = name
-
-                    title.innerHTML = ''
-                    title.appendChild(div)
-                    div.appendChild(typeElm)
-                    if (name != '') div.appendChild(nameElm)
+                    const template = `<div class="object-node-name">
+                        <span style="color:${typeColor}">${type}</span>
+                        ${name != '' ? '<span>' + name + '</span>' : ''}
+                    </div>`
+                    title.innerHTML = template
                 }
 
                 const children = e.itree.ref.querySelector('.object-node-name').children
                 if (object.updated) {
                     children[0].style.color = '#ffaf36'
                     if (children[1]) children[1].style.color = '#ffaf36'
+                    requestAnimationFrame(()=>this.setNodeUpdatedStateIGZ(e, true))
                 }
                 else {
                     children[0].style.color = typeColor
@@ -415,6 +428,14 @@ class Main {
             node.set('text', node.text + '*')
             nameElm.innerText += '*'
         }
+    }
+
+    static renameNodeIGZ(node, newName) {
+        const children = node.itree.ref.querySelector('.object-node-name').children
+        const nameElm = children[1] ?? children[0]
+
+        node.set('text', newName)
+        nameElm.innerText = newName
     }
 
     // Remove all trailing '*' from IGZ object node names
@@ -851,13 +872,6 @@ function cloneObject() {
     }
     Main.pak.updated = true
     Main.updateTitle()
-
-    requestAnimationFrame(() => 
-        Main.tree.available().forEach(e => {
-            if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
-                Main.setNodeUpdatedStateIGZ(e, true)
-            }
-        }))
 }
 
 // Rename the currently focused object in the IGZ tree
@@ -870,19 +884,10 @@ function renameObject() {
 
     const onRename = (name) => {
         name = name.split(':').pop().trim()
-        
         Main.igz.renameObject(object, name)
         Main.pak.updated = true
-
-        Main.tree.available().each(node => {
-            if (node.type == 'object' && node.objectIndex == object.index) {
-                node.set('text', object.getName())
-                const children = node.itree.ref.querySelector('.object-node-name').children
-                const nameElm = children[1] ?? children[0]
-                nameElm.innerText = ' ' + name
-                Main.setNodeUpdatedStateIGZ(node, true)
-            }
-        })
+        const node = tree.available().find(e => e.type == 'object' && e.objectIndex === object.index)
+        Main.renameNodeIGZ(node, name)
         Main.colorizeMainTree()
         Main.updateTitle()
     }
@@ -1161,14 +1166,7 @@ async function main()
         Main.applyTreeStyle()
     })
 
-    elm('#refresh-tree').addEventListener('click', () => {
-        const root = Main.treeMode === 'igz' ? Main.igz : Main.hkx
-        Main.saveTreeExpandedState(Main.treeMode)
-        Main.reloadTree([])
-        Main.reloadTree(root.toNodeTree(true, localStorage.getItem('display-mode')))
-        Main.colorizeMainTree()
-        Main.updateTitle()
-    })
+    elm('#refresh-tree').addEventListener('click', () => Main.reloadTreeIGZ())
 
     /// Search bar
     const autoRefreshElm   = elm('#auto-refresh')

@@ -275,8 +275,10 @@ class IGZ {
         const index = this.objects.length - 2
         this.objects = this.objects.slice(0, index + 1).concat(object, this.objects.slice(index + 1))
 
-        if (object.nameID != -1)
+        if (object.nameID != -1) {
+            this.addTSTR(object.name)
             this.addEXNM(object.name)
+        }
     }
 
     /**
@@ -940,7 +942,7 @@ class IGZ {
     /**
      * Convert the IGZ file to a tree structure for UI display
      */
-    toNodeTree(recursive = true, mode = 'root') {        
+    toNodeTree(recursive = true, mode = 'root') {
         let rootText = 'Root Objects'
         let root = this.objects
         

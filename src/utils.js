@@ -145,12 +145,16 @@ function isVectorZero(vector) {
     return vector.every(e => e == 0)
 }
 
+const typeColors = {}
 function randomColor(type) {
-    const id = computeHash(type+'y')
-    const r = (id & 0xFF) / 255
-    const g = ((id >> 8) & 0xFF) / 255
-    const b = ((id >> 16) & 0xFF) / 255
-    return `rgb(${r * 127 + 127}, ${g * 127 + 127}, ${b * 127 + 127})`
+    if (typeColors[type] == null) {
+        const id = computeHash(type+'y')
+        const r = (id & 0xFF) / 255
+        const g = ((id >> 8) & 0xFF) / 255
+        const b = ((id >> 16) & 0xFF) / 255
+        typeColors[type] = `rgb(${r * 127 + 127}, ${g * 127 + 127}, ${b * 127 + 127})`
+    }
+    return typeColors[type]
 }
 
 /**

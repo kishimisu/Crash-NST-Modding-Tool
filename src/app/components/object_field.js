@@ -338,6 +338,16 @@ class ObjectField {
     createCustomListInput([short_names, full_names], selected, include_none = true) {
         const input = createElm('select', 'data-type-select')
 
+        if (short_names.length > 500 && this.parent?.element_count > 100) {
+            const option = createElm('option')
+            option.innerText = selected
+            input.appendChild(option)
+            const option2 = createElm('option')
+            option2.innerText = `--- Too many options (${short_names.length}) ---`
+            input.appendChild(option2)
+            return input
+        }
+
         // Add default option
         if (include_none) {
             const option = createElm('option')
@@ -410,7 +420,6 @@ class ObjectField {
     }
 
     createObjectRefInput() {
-        const offs = this.object.offset + this.offset
         const inROFS = this.object.fixups.ROFS.includes(this.offset)
         const inRNEX = this.object.fixups.RNEX.includes(this.offset)
         const inREXT = this.object.fixups.REXT.includes(this.offset)

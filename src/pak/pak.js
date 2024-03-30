@@ -280,12 +280,16 @@ class Pak {
     updatePackageFile() {
         // Get current paths listed in the package file
         const pkg_files = this.package_igz.fixups.TSTR.data.filter(e => e.includes('.'))
+        let unmatched = pkg_files.slice()
         let updated = false
 
         // Update which files are included
         for (const file of this.files) {
             const path = file.path.toLowerCase()
             const existsInPKG = pkg_files.includes(path)
+
+            if (existsInPKG)
+                unmatched.splice(unmatched.indexOf(path), 1)
 
             if (file.include_in_pkg && !existsInPKG) {
                 updated = true
@@ -295,6 +299,16 @@ class Pak {
                 updated = true
                 pkg_files.splice(pkg_files.indexOf(path), 1)
             }
+        }
+
+        // Remove deleted files
+        unmatched = unmatched.filter(e => !e.startsWith('packages/'))
+        if (unmatched.length > 0) {
+            for (let i = 0; i < unmatched.length; i++) {
+                const index = pkg_files.indexOf(unmatched[i])
+                pkg_files.splice(index, 1)
+            }
+            updated = true
         }
 
         // Update package file

@@ -23,7 +23,10 @@ class LevelExplorer {
 
     focusObject(object, updateCamera = true) {
         if (!this.initialized) this.init()
-        else this.toggleVisibility(true)
+        else {
+            this.toggleVisibility(true)
+            this.clearModelScene()
+        }
 
         const match = this.scene.children.find(e => e.userData?.igz == Main.igz.path && e.userData?.objectIndex == object.index)
 
@@ -75,7 +78,7 @@ class LevelExplorer {
         this.renderer?.render(this.scene, this.cam)
     }
 
-    showModel(igz) {
+    showModelScene(igz) {
         const model = extractModelData(igz)
         if (model == null) return console.warn('No model data found in', igz.path)
 
@@ -126,6 +129,15 @@ class LevelExplorer {
             this.model_controls.update()
             this.renderer.render(scene, cam)
         })
+    }
+
+    clearModelScene() {
+        if (this.mode == 'level') return
+        this.mode = 'level'
+        this.model_scene = null
+        this.model_cam = null
+        this.model_controls.dispose()
+        this.model_controls = null
     }
 
     getScene() {
@@ -179,9 +191,11 @@ class LevelExplorer {
                             Main.objectView = new ObjectView(object)
                             Main.focusObject(object.index)
                         }
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], (-object3D.position.x).toFixed(3), 0)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object3D.position.z.toFixed(3), 1)
-                        Main.objectView.onFieldUpdate(Main.objectView.fields[3], object3D.position.y.toFixed(3), 2)
+                        const field = object.type == 'igSplineControlPoint2' ? 1 : 3
+                        const parentPosition = object3D.userData.splineParentPosition ?? [0, 0, 0]
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[field], (-object3D.position.x + parentPosition[0]).toFixed(3), 0)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[field], (object3D.position.z - parentPosition[2]).toFixed(3), 1)
+                        Main.objectView.onFieldUpdate(Main.objectView.fields[field], (object3D.position.y - parentPosition[1]).toFixed(3), 2)
                     }
                 }, 500)
             })
@@ -272,14 +286,7 @@ class LevelExplorer {
         this.pak = Main.pak
         this.scene.clear()
         this.toggleVisibility(true)
-
-        if (this.mode == 'model') {
-            this.mode = 'level'
-            this.model_scene = null
-            this.model_cam = null
-            this.model_controls.dispose()
-            this.model_controls = null
-        }
+        this.clearModelScene()
 
         // Add ambient light
         const ambientLight = new AmbientLight(0x525255)
@@ -309,7 +316,7 @@ class LevelExplorer {
                 if (showGrass || !file.path.includes('Grass'))
                 modelFiles.push(file)
             }
-            else if (file.path.startsWith('maps/') && !file.path.includes('Audio') && !file.path.includes('Music') && !file.path.includes('StaticCollision'))
+            else if (file.path.startsWith('maps/') && file.include_in_pkg && !file.path.includes('Audio') && !file.path.includes('Music') && !file.path.includes('StaticCollision'))
                 mapFiles.push(file)
         }
 
@@ -471,7 +478,14 @@ class LevelExplorer {
         const transform = igParentTransform?.getTransform() ?? igEntityTransform?.getTransform() ?? {}
         const parentPosition = Entity.view.readVector(3, 0x20)
 
-        return object.toMeshInfo(igz, { model_name, transform, color, parentPosition})
+        const show_splines = (localStorage.getItem('explorer-show-splines') ?? 'true') === 'true'
+        let controlPoints = null
+        if (show_splines) {
+            const igSplineControlPoint2List = CEntityData.tryGetChildRecursive('igComponentDataTable', 'CSplineComponentData', 'igSpline2', 'igSplineControlPoint2List')
+            controlPoints = igSplineControlPoint2List?.children.map(e => e.object.toMeshInfo(igz, {position: e.object.view.readVector(3, 0x10)}))
+        }
+
+        return object.toMeshInfo(igz, { model_name, transform, color, parentPosition, controlPoints})
     }
 
     process_CGameEntity(igz, object) 
@@ -545,7 +559,7 @@ class LevelExplorer {
     loadEntity(entity) {
         if (entity == null) return
 
-        let { name, model_name, position, rotation, scale, color, parentPosition, controlPoints } = entity
+        let { igz, name, model_name, position, rotation, scale, color, parentPosition, controlPoints, objectHash } = entity
         let model = null
 
         if (name.includes('Collectible_Wumpa'))
@@ -568,8 +582,13 @@ class LevelExplorer {
         }
         model.userData = { ...entity }
 
-        // Apply custom color (temporary)
+        // Apply custom color
         const lower = name.toLowerCase()
+
+        if (color == 0xffffff && Main.pak.getCollisionItem(objectHash, igz)) { // Object has StaticCollision
+            color = 0xffdfba
+        }
+
         if (name.includes('Crate_')) {
             color = 0xfaba52
         }
@@ -585,8 +604,7 @@ class LevelExplorer {
 
         // Create splines (camera...)
         if (controlPoints) {
-            controlPoints.forEach(e => e.position = e.position.map((v, i) => v + position[i]))
-            this.createLine(controlPoints, 0xff0000, 0.001, true)
+            this.createLine(controlPoints, position, 0xff0000, 0.001, true)
         }
 
         if (position[0] == 0 && position[1] == 0 && position[2] == 0) {
@@ -627,8 +645,9 @@ class LevelExplorer {
         this.scene.add(model)
     }
 
-    createLine(points, color, width, addMarkers = true) {
+    createLine(points, parentPosition, color, width, addMarkers = true) {
         const geo = new LineGeometry()
+        points.forEach(e => e.position = e.position.map((v, i) => v + parentPosition[i]))
         geo.setPositions(points.map(e => e.position).flat())
         const mat = new LineMaterial({
             color: color,
@@ -641,10 +660,10 @@ class LevelExplorer {
 
         if (addMarkers) {
             for (const point of points) {
-                const dot = new SphereGeometry(5, 5, 5)
+                const dot = new SphereGeometry(10, 10, 10)
                 const sphere = new Mesh(dot, new MeshBasicMaterial({ color: 0xff0000 }))
                 sphere.position.set(...point.position)
-                sphere.userData = { ...point }
+                sphere.userData = { ...point, splineParentPosition: parentPosition }
                 this.scene.add(sphere)
             }
         }

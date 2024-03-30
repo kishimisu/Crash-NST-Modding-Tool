@@ -154,7 +154,10 @@ class Main {
 
         tree.available().forEach((e, i) => {
             if (expandedState[i]) e.expand()                        
-            if (e.fileIndex === selectedNode) e.select()
+            if (e.fileIndex === selectedNode) {
+                e.select()
+                e.focus()
+            }
         })
     }
 
@@ -189,6 +192,7 @@ class Main {
             else if (e.type === 'object') {
                 const root = this.igz ?? this.hkx
                 const object = root.objects[e.objectIndex]
+                if (object == null) return
                 const title = e.itree.ref.querySelector('.title')
                 const typeColor = randomColor(object.type)
 
@@ -457,8 +461,10 @@ class Main {
 /**
  * Handles a click on a tree node (in the main tree)
  */
-function onNodeClick(event, node) 
+function onNodeClick(event, node)
 {
+    if (node == null) return console.warn('onNodeClick: node is null')
+    
     if (Main.levelExplorer.mode == 'model')
         Main.levelExplorer.toggleVisibility(false)
 
@@ -491,7 +497,7 @@ function onNodeClick(event, node)
             if ((file.path.startsWith('actors/') || file.path.startsWith('models/')) && file.path.endsWith('.igz')) {
                 const igz = IGZ.fromFileInfos(file)
                 igz.setupChildrenAndReferences()
-                Main.levelExplorer.showModel(igz)
+                Main.levelExplorer.showModelScene(igz)
             }
 
             elm('#include-in-pkg').checked = file.include_in_pkg
@@ -1232,9 +1238,11 @@ async function main()
     // On IGZ file rename
     tree.on('node.edited', (node, oldValue, newValue) => {
         if (node.type === 'file') {
+            if (newValue.endsWith('*')) newValue = newValue.slice(0, -1)
             const file = pak.files[node.fileIndex]
             file.rename(newValue)
             pak.updated = true
+            Main.setNodeToUpdated(node)
             Main.updateTitle()
             Main.colorizeMainTree()
         }
@@ -1278,13 +1286,15 @@ async function main()
                 Main.showHKXPreview(fileIndex)
 
             const node = tree.lastSelectedNode()
-            Main.setNodeToUpdated(node)
-            node.select()
+            if (node) {
+                Main.setNodeToUpdated(node)
+                node.select()
+            }
 
             if (Main.levelExplorer.mode == 'model' && Main.levelExplorer.visible) {
                 const modelIGZ = IGZ.fromFileInfos(pak.files[fileIndex])
                 modelIGZ.setupChildrenAndReferences()
-                Main.levelExplorer.showModel(modelIGZ)
+                Main.levelExplorer.showModelScene(modelIGZ)
             }
 
             console.log('Replaced', pak.files[fileIndex], pak.files[newFileIndex])

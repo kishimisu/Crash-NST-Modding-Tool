@@ -306,7 +306,7 @@ class ObjectView {
 
         this.object.references.forEach(object => {
             const p = createElm('p', 'object-references')
-            p.innerHTML = '&nbsp;&nbsp;⇒ ' + object.getDisplayName()
+            p.innerHTML = '&nbsp;&nbsp;⇒ ' + object.getName()
             p.onclick = () => {
                 Main.objectView = new ObjectView(object)
                 Main.focusObject(object.index)

@@ -156,6 +156,7 @@ class IGZ {
 
             object.name = name
             object.nameID = nameID
+            object.original_name_hash = computeHash(name)
         })
 
         /// Add type count to unnamed objects ///

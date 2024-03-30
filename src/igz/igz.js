@@ -217,7 +217,6 @@ class IGZ {
             global_offset: this.getGlobalOffset(offset),
             custom: true, updated: true
         })
-        object.fixups = { RSTT: [], RHND: [], ROFS: [], RNEX: [], REXT: [], RPID: [] }
         object.view.setInt(typeID, 0)
 
         this.addObject(object)
@@ -797,17 +796,25 @@ class IGZ {
     }
     
     setupFixups() {
+        let last_offsets = {
+            RSTT: 0,
+            RHND: 0,
+            ROFS: 0,
+            RNEX: 0,
+            REXT: 0,
+            RPID: 0
+        }
+
         for (const object of this.objects) {
-            object.fixups = {}
             const addFixup = (name) => {
-                object.fixups[name] = []
                 if (this.fixups[name] == null) return
-                for (let offset of this.fixups[name].data) {
-                    offset = this.getGlobalOffset(offset)
-                    if (offset >= object.global_offset + object.size) break
-                    if (offset >= object.global_offset) {
-                        object.fixups[name].push(offset - object.global_offset)
-                    }
+                let index = last_offsets[name]
+                let nextOffset = this.fixups[name].data[index]
+                while (nextOffset < object.offset + object.size) {
+                    index++
+                    last_offsets[name]++
+                    object.fixups[name].push(nextOffset - object.offset)
+                    nextOffset = this.fixups[name].data[index]
                 }
             }
             ['RSTT', 'RHND', 'ROFS', 'RNEX', 'REXT', 'RPID'].forEach(addFixup)
@@ -866,12 +873,31 @@ class IGZ {
      * @returns {igObject} The object that contains the given offset
      */
     findObject(offset, global_offset = true) {
-        if (global_offset) {
-            offset = this.getGlobalOffset(offset)
-            if (offset == -1) return null
-            return this.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
+        offset = this.getGlobalOffset(offset)
+        if (offset == -1) return null
+
+        const maxIterations = Math.log2(this.objects.length) * 2
+        let index = Math.floor(this.objects.length / 2)
+        let step  = Math.floor(index / 2)
+        let iterations = 0
+
+        while(iterations++ < maxIterations) {
+            const object = this.objects[index]
+            const object_offset = global_offset ? object.global_offset : object.offset
+            const above_start = offset >= object_offset
+            const below_end = offset < object_offset + object.size
+
+            if (above_start && below_end) return object
+
+            if (above_start) index += step
+            else index -= step
+
+            step = Math.max(1, Math.floor(step / 2))
         }
-        return this.objects.find(e => offset >= e.offset && offset < e.offset + e.size)
+
+        console.warn(`Object not found for offset ${offset} after ${iterations} iterations, falling back to full search`)
+        
+        return this.objects.find(e => offset >= e.global_offset && offset < e.global_offset + e.size)
     }
 
     /**

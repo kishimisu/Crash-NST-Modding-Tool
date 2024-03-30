@@ -102,11 +102,15 @@ class Fixup {
         
         if (stringFixups.includes(this.type)) {
             const strings = data.flat()
+            let all_strings = ''
 
             for (let i = 0; i < strings.length; i++) {
                 const str = strings[i] + '\0' + (this.type != 'TDEP' && strings[i].length % 2 == 0 ? '\0' : '')
-                encoded = encoded.concat([...str].map(e => e.charCodeAt(0)))
+                all_strings += str
             }
+
+            const bytes = new TextEncoder().encode(all_strings)
+            encoded = Array.from(bytes)
         }
         else if (intPairFixups.includes(this.type)) {
             const bytes = data.flatMap(e => intToBytes(e[0]).concat(intToBytes(e[1])))

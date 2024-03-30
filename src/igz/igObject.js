@@ -30,7 +30,7 @@ class igObject {
         this.custom = custom
 
         this.objectRefs = [] // igObjectRef references
-        this.fixups = {}     // Fixups references 
+        this.fixups = { RSTT: [], RHND: [], ROFS: [], RNEX: [], REXT: [], RPID: [] } // Fixups references
     }
 
     clone(igz, offset) {

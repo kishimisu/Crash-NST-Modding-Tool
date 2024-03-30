@@ -1,4 +1,5 @@
 import igObject from "../../../igz/igObject"
+import { computeHash } from "../../../utils"
 
 igObject.prototype.tryGetChild = function(type, name) {
     return name == null
@@ -74,6 +75,7 @@ igObject.prototype.toMeshInfo = function(igz, { color = 0xffffff, transform = {}
         name: this.name,
         objectIndex: this.index,
         position: this.view.readVector(3, 0x20),
+        objectHash: this.original_name_hash ?? computeHash(this.name),
         type: this.type,
         color,
         ...transform,
@@ -88,7 +90,7 @@ igObject.prototype.toMeshInfo = function(igz, { color = 0xffffff, transform = {}
     return info
 }
 
-igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
+igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4, method = 'UInt') {
     const data = []
 
     const memory_size = this.view.readUInt(offset)
@@ -105,7 +107,7 @@ igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
 
     for (let i = 0; i < elementCount; i++) {
         const offset = startOffset + i * elementSize
-        const value  = object.view.readUInt(offset)
+        const value  = object.view['read' + method](offset)
         data.push(value)
     }
 
@@ -116,4 +118,24 @@ igObject.prototype.extractMemoryData = function(igz, offset, elementSize = 4) {
         relative_offset: startOffset,
         memory_size
     }
+}
+
+igObject.prototype.extractCollisionData = function(igz) {
+    const data = this.extractMemoryData(igz, 0x20).data
+    const values = this.extractMemoryData(igz, 0x10, 2, 'Int16').data
+
+    const items = []
+    for (let i = 0; i < data.length; i += 2) {
+        const objectHash = data[i]
+        const namespaceHash = data[i + 1]
+        if (objectHash == 0xFAFAFAFA || namespaceHash == 0xFAFAFAFA) continue
+
+        items.push({
+            objectHash,
+            namespaceHash,
+            value: values[i / 2]
+        })
+    }
+
+    return items
 }

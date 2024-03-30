@@ -21,7 +21,7 @@ module.exports = [
     loader: 'raw-loader'
   },
   {
-    test: /\.metadata$/,
+    test: /\.(metadata|hkx)$/,
     loader: 'buffer-loader'
   }
 ];

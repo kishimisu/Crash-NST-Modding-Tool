@@ -28,6 +28,9 @@ class igObject {
         this.invalid = null        // null | string (reason)
         this.updated = updated
         this.custom = custom
+
+        this.objectRefs = [] // igObjectRef references
+        this.fixups = {}     // Fixups references 
     }
 
     clone(igz, offset) {
@@ -38,7 +41,7 @@ class igObject {
                                .map(field => ({field, mem_infos: this.extractMemoryData(igz, field.offset)}))
                                .filter(e => e.mem_infos.active)
         
-                               let size = this.dynamicObject ? sizeMetadata : sizeMTSZ                 
+        let size = this.dynamicObject ? sizeMetadata : sizeMTSZ                 
         let data = Array.from(this.data.slice(0, size))
 
         // Copy memory data
@@ -65,6 +68,15 @@ class igObject {
         })
 
         if (this.nameID != -1) object.name += '_cloned'
+        
+        object.original_name_hash = this.original_name_hash ?? computeHash(this.name)
+        
+        for (let i = igz.objects.length - 1; i >= 0; i--) {
+            if (igz.objects[i].typeID == this.typeID) {
+                object.typeCount = igz.objects[i].typeCount + 1
+                break
+            }
+        }
         
         const fixups = {}
         Object.entries(this.fixups).forEach(([key, value]) => {
@@ -189,6 +201,61 @@ class igObject {
         this.data = new_data
         this.size = new_data.length
         this.view = new BufferView(this.data)
+    }
+
+    /**
+     * Activate or deactivate a fixup for a specific offset
+     * 
+     * @param {string} fixup - Fixup type
+     * @param {integer} offset - Fixup offset relative to start of parent object
+     * @param {boolean} active - Activate or deactivate the fixup
+     * @param {igObject | number} child - Child object or value to set
+     * @param {integer} relative_offset - Relative offset within child object
+     * @returns {boolean} - True if the fixup was updated, false otherwise
+     */
+    activateFixup(fixup, offset, active, child, relative_offset = 0) {
+        if (!['ROFS', 'RSTT'].includes(fixup)) 
+            console.warn('activateFixup: Fixup not implemented:', fixup)
+
+        if (active) {
+            const exists = this.fixups[fixup].includes(offset)
+            if (!exists) {
+                this.fixups[fixup].push(offset)
+                this.fixups[fixup].sort((a, b) => a - b)
+            }
+    
+            if (fixup == 'ROFS') {
+                if (!exists)
+                    this.objectRefs.push({ child, relative_offset, offset})
+                else {
+                    const id = this.fixups[fixup].indexOf(offset)
+                    this.objectRefs[id] = { child, relative_offset, offset}
+                }
+            }
+            else if (fixup == 'RSTT')
+                this.view.setUInt(child, offset)
+    
+            return true
+        }
+        else if (!active && this.fixups[fixup].includes(offset)) {
+            const id = this.fixups[fixup].indexOf(offset)
+            if (id == -1) {
+                console.warn(`Fixup ${fixup} at offset ${offset} not found in ${this.getName()}`)
+                return false
+            }
+            
+            this.fixups[fixup].splice(id, 1)
+    
+            if (fixup == 'ROFS') {
+                this.objectRefs.splice(id, 1)
+            }
+            else if (fixup == 'RSTT')
+                this.view.setUInt(0, offset)
+            
+            return true
+        }
+    
+        return false
     }
 
     getName() {

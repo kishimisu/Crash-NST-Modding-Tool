@@ -2,8 +2,8 @@ import { bytesToUInt, bytesToUInt16, intToBytes } from '../utils.js'
 
 const stringFixups  = [ 'TDEP', 'TSTR', 'TMET' ]
 const intPairFixups = [ 'EXID', 'EXNM' ]
-const intFixups     = [ 'MTSZ', 'ROOT', 'ONAM' ]
-const bytesFixups   = [ 'RVTB', 'RSTT', 'ROFS', 'RPID', 'RHND', 'RNEX', 'REXT', 'NSPC' ]
+const intFixups     = [ 'MTSZ', 'ROOT', 'ONAM', 'NSPC' ]
+const bytesFixups   = [ 'RVTB', 'RSTT', 'ROFS', 'RPID', 'RHND', 'RNEX', 'REXT' ]
 const allFixups     = [ ...stringFixups, ...intPairFixups, ...intFixups, ...bytesFixups ]
 
 class Fixup {
@@ -81,7 +81,7 @@ class Fixup {
                 data.push(int)
             }
         }
-        else if (this.type == 'EXID' || this.type == 'EXNM') {
+        else if (intPairFixups.includes(this.type)) {
             // Int32 pairs
             for (let i = 0; i < this.item_count; i++) {
                 const pair = [ bytesToUInt(fixupData, i * 8), bytesToUInt(fixupData, i * 8 + 4) ]
@@ -100,14 +100,17 @@ class Fixup {
 
         let encoded = []
         
-        if (this.type === 'TSTR') {
-            for (let i = 0; i < data.length; i++) {
-                const str = data[i] + '\0' + (data[i].length % 2 == 0 ? '\0' : '')
+        if (stringFixups.includes(this.type)) {
+            const strings = data.flat()
+
+            for (let i = 0; i < strings.length; i++) {
+                const str = strings[i] + '\0' + (this.type != 'TDEP' && strings[i].length % 2 == 0 ? '\0' : '')
                 encoded = encoded.concat([...str].map(e => e.charCodeAt(0)))
             }
         }
-        else if (this.type === 'EXNM') {
-            encoded = data.flatMap(e => intToBytes(e[0]).concat(intToBytes(e[1])))
+        else if (intPairFixups.includes(this.type)) {
+            const bytes = data.flatMap(e => intToBytes(e[0]).concat(intToBytes(e[1])))
+            encoded = bytes
         }
         else if (this.isEncoded()) {
             encoded = encodeRVTB(data)
@@ -119,10 +122,11 @@ class Fixup {
             throw new Error ('Update not implemented: ' + this.type)
         }
 
-        if (this.type != 'EXNM')
+        if (this.type != 'TDEP' && !intPairFixups.includes(this.type))
             this.data = data
         
         this.rawData = this.rawData.slice(0, this.header_size).concat(encoded)
+        if (this.rawData.length % 16 != 0) this.rawData.push(...Array(16 - this.rawData.length % 16).fill(0))
         this.size = this.rawData.length
         this.item_count = data.length
     }
@@ -148,7 +152,7 @@ class Fixup {
             return this.data.map((e, i) => {
                 let text = i + ': '
 
-                if (this.encoded || this.type == 'ONAM') {
+                if (this.encoded || this.type == 'ONAM' || this.type == 'NSPC') {
                     const object = this.getCorrespondingObject(e, objects)
                     if (object.object == null) text += '<ERROR>'
                     else {

@@ -41,12 +41,15 @@ class ObjectView {
         if (Main.treeMode == 'igz') {
             const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(this.object.type)
             const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(this.object.view.readVector(3, 0x20))
+            const collisionButtonVisible = this.object.type == 'igEntity' && Main.pak.getCollisionItem(this.object.original_name_hash, Main.igz.path)
             elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
             elm('#object-rename').style.display = this.object.nameID == -1 ? 'none' : 'block'
+            elm('#add-collisions').style.display = collisionButtonVisible ? 'block' : 'none'
         }
         else if (Main.treeMode == 'hkx') {
             elm('#focus-in-explorer').style.display = 'none'
             elm('#object-rename').style.display = 'none'
+            elm('#add-collisions').style.display = 'none'
         }
         elm('#object-clone').style.display = Main.treeMode == 'igz' ? 'block' : 'none'
         elm('#object-delete').style.display = Main.treeMode == 'igz' ? 'block' : 'none'

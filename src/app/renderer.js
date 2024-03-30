@@ -14,6 +14,7 @@ import ObjectView from './components/object_view.js'
 import LevelExplorer from './components/level_explorer.js'
 import { clearUpdatedData } from './components/object_field.js'
 import { init_file_import_modal } from './components/import_modal.js'
+import { addCollisionToObject } from './components/utils/collisions.js'
 import { createElm, elm, getArchiveFolder, getBackupFolder, getGameFolder, getTempFolder, isGameFolderSet } from './components/utils/utils.js'
 import { randomColor } from '../utils.js'
 import './components/utils/igObjectExtension.js'
@@ -298,12 +299,24 @@ class Main {
         elm('#igz-open').style.display = 'block'
 
         const file = pak.files[fileIndex]
-        const hkx = new HavokFile(file.getUncompressedData(), file.path)
-        
-        this.hkx = hkx
+
+        try {
+            const hkx = new HavokFile(file.getUncompressedData(), file.path)
+            this.hkx = hkx
+        }
+        catch (e) {
+            this.hkx = null
+            treePreview.load([{ 
+                text: 'There was an error loading this file.',
+                children: [{ text: e.message }],
+            }])
+            treePreview.get(0).itree.ref.style.color = '#e3483a'
+            console.error(e)
+            return
+        }
         this.igz = null
 
-        treePreview.load(hkx.toNodeTree(false, localStorage.getItem('display-mode')))
+        treePreview.load(this.hkx.toNodeTree(false, localStorage.getItem('display-mode')))
         treePreview.get(1).expand()
         this.colorizeMainTree(treePreview)
     }
@@ -655,8 +668,8 @@ function loadIGZ(filePath)
 async function saveFile(saveAs = false)
 {
     // Save igz from pak
-    if (Main.treeMode == 'igz' && pak != null && !saveAs) {
-        updateIGZWithinPAK()
+    if (Main.treeMode != 'pak' && pak != null && !saveAs) {
+        updateFileWithinPAK()
         savePAK(pak.path)
         return
     }
@@ -718,22 +731,23 @@ function saveIGZ(filePath)
 }
 
 // Update pak with new igz data
-function updateIGZWithinPAK() 
+function updateFileWithinPAK() 
 {
-    const igzFile = pak.files.find(e => e.path === igz.path)
+    const root = Main.treeMode == 'igz' ? Main.igz : Main.hkx
+    const file = pak.files.find(e => e.path === root.path)
 
-    igzFile.data = igz.save()
-    igzFile.size = igzFile.data.length
-    igzFile.compression = 0xFFFFFFFF
-    igzFile.original = false
-    igzFile.updated = true
+    file.data = root.save()
+    file.size = file.data.length
+    file.compression = 0xFFFFFFFF
+    file.original = false
+    file.updated = true
 
     pak.updated = true
     if (Main.objectView) Main.objectView.onSave()
     Main.clearAllNodesUpdatedStateIGZ()
     Main.updateTitle()
 
-    console.log('Saved IGZ within PAK', igzFile.path)
+    console.log('Saved file within PAK', file.path)
 }
 
 // Import files to the current pak
@@ -745,8 +759,8 @@ async function importToPAK() {
     const file_path = await ipcRenderer.invoke('open-file')
     if (file_path == null) return
 
-    if (file_path.endsWith('.igz')) {
-        // On .igz import, add the file to the current pak under the current selected folder
+    if (!file_path.endsWith('.pak')) {
+        // On .igz/.hkx import, add the file to the current pak under the current selected folder
         const root = 'temporary/mack/data/win64/output/'
         const lastNode = tree.lastSelectedNode()
         const folderPath = lastNode?.type === 'folder' ? lastNode.path.replace(root, '') + '/' : ''
@@ -811,17 +825,14 @@ function cloneObject() {
     const firstID = Main.igz.objects.length - 1
 
     Main.saveTreeExpandedState('igz')
-    Main.igz.cloneObject(Main.objectView.object)
+
+    const newObjects = Main.igz.cloneObject(Main.objectView.object)
+    Main.igz.updateObjects(newObjects)
+    
     tree.load([]) 
     tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
     Main.colorizeMainTree()
     Main.restoreTreeExpandedState('igz')
-
-    Main.tree.available().forEach(e => {
-        if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
-            Main.setNodeUpdatedStateIGZ(e, true)
-        }
-    })
 
     const object = Main.igz.objects[firstID]
     Main.objectView = new ObjectView(object)
@@ -834,6 +845,13 @@ function cloneObject() {
     }
     Main.pak.updated = true
     Main.updateTitle()
+
+    requestAnimationFrame(() => 
+        Main.tree.available().forEach(e => {
+            if (e.type == 'object' && e.objectIndex >= firstID && e.objectIndex < Main.igz.objects.length - 1) {
+                Main.setNodeUpdatedStateIGZ(e, true)
+            }
+        }))
 }
 
 // Rename the currently focused object in the IGZ tree
@@ -894,18 +912,52 @@ function deleteObject() {
         return
     }
 
-    if (Main.levelExplorer.initialized) {
-        Main.levelExplorer.deleteObject(object)
-    }
-
     Main.saveTreeExpandedState('igz')
-    Main.igz.deleteObject(object)
-    tree.load([]) 
-    tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
+    Main.igz.deleteObject(object, true)
+    Main.igz.updateObjects()
+    tree.load([])
+    tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode')))
     Main.colorizeMainTree()
     Main.lastFileIndex.igz = null
     Main.restoreTreeExpandedState('igz')
     Main.showObjectDataView(false)
+
+    if (Main.levelExplorer.initialized) {
+        Main.levelExplorer.init()
+    }
+}
+
+function addCollision() {
+    try {
+        const progressCallback = (message) =>
+            ipcRenderer.send('set-progress-bar', 1, null, 'Adding collision to object', message, 'Adding collision to object...')
+        
+        const newObject = addCollisionToObject(Main.objectView.object, progressCallback)
+        
+        ipcRenderer.send('set-progress-bar', null)
+
+        Main.saveTreeExpandedState('igz')
+        Main.tree.load([])
+        Main.tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode')))
+        Main.colorizeMainTree()
+        Main.restoreTreeExpandedState('igz')
+        Main.updateTitle()
+
+        if (Main.levelExplorer.initialized) {
+            Main.levelExplorer.init()
+            if (Main.levelExplorer.visible) {
+                Main.levelExplorer.focusObject(newObject, false)
+            }
+        }
+
+        Main.objectView = new ObjectView(newObject)
+        Main.focusObject(newObject.index)
+    }
+    catch (e) {
+        ipcRenderer.send('set-progress-bar', null)
+        ipcRenderer.send('show-error-message', 'An error occurred while adding collision', e.message)
+        throw e
+    }
 }
 
 // Revert a .pak file to its original content
@@ -963,7 +1015,7 @@ function launchGame(pak) {
 function saveAndLaunch() {
     if (pak == null) return // Can only save and launch from a .pak file
 
-    if (Main.treeMode == 'igz') updateIGZWithinPAK()
+    if (Main.treeMode != 'pak') updateFileWithinPAK()
 
     if (pak.updated) savePAK(pak.path)
     launchGame(pak)
@@ -1051,13 +1103,6 @@ function toggleEndian(bigEndian) {
 }
 
 /**
- * Toggle whether to save the referenceCount on igz save
- */
-function toggleSaveReferenceCount(saveReferenceCount) {
-    localStorage.setItem('toggle-refcount', saveReferenceCount)
-}
-
-/**
  * Main app window entry point
  */
 async function main() 
@@ -1108,6 +1153,15 @@ async function main()
         const currentSize = parseInt(localStorage.getItem('tree-size') ?? 18)
         localStorage.setItem('tree-size', Math.min(22, currentSize + sizeIncrease))
         Main.applyTreeStyle()
+    })
+
+    elm('#refresh-tree').addEventListener('click', () => {
+        const root = Main.treeMode === 'igz' ? Main.igz : Main.hkx
+        Main.saveTreeExpandedState(Main.treeMode)
+        Main.reloadTree([])
+        Main.reloadTree(root.toNodeTree(true, localStorage.getItem('display-mode')))
+        Main.colorizeMainTree()
+        Main.updateTitle()
     })
 
     /// Search bar
@@ -1267,7 +1321,7 @@ async function main()
 
     // (IGZ view) Back to .pak button
     elm('#back-pak').addEventListener('click', async () => {
-        const root = Main.treeMode == 'igz' ? 'igz' : 'hkx'
+        const root = Main.treeMode == 'igz' ? Main.igz : Main.hkx
         const confirm = !root.updated || await ipcRenderer.invoke('show-confirm-message', 'You have unsaved changes. Are you sure you want to go back to the PAK file?')
         if (!confirm) return
         const lastIndex = Main.lastFileIndex.pak
@@ -1302,6 +1356,7 @@ async function main()
     elm('#object-clone').addEventListener('click', () => cloneObject())
     elm('#object-rename').addEventListener('click', () => renameObject())
     elm('#object-delete').addEventListener('click', () => deleteObject())
+    elm('#add-collisions').addEventListener('click', () => addCollision())
 
     if (localStorage.getItem('first_launch') == null) {
         localStorage.setItem('first_launch', false)
@@ -1340,7 +1395,6 @@ ipcRenderer.on('menu-backup-game-folder', () => backupGameFolder())
 ipcRenderer.on('menu-restore-game-folder', () => backupGameFolder(true))
 ipcRenderer.on('menu-change-game-folder', () => changeGameFolderPath())
 ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
-ipcRenderer.on('menu-toggle-refcount', (_, checked) => toggleSaveReferenceCount(checked))
 
 ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
 ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())

@@ -382,24 +382,6 @@ class LevelExplorer {
         this.renderer.render(this.scene, this.cam)
     }
 
-    deleteObject(object) {
-        if (!this.initialized) return
-
-        this.transformControls.detach()
-
-        const match = this.scene.children.find(e => e.userData?.igz == Main.igz.path && e.userData?.objectIndex == object.index)
-        if (match) {
-            this.scene.remove(match)
-            this.renderer.render(this.scene, this.cam)
-        }
-        
-        for (const child of this.scene.children) {
-            if (child.userData?.igz == Main.igz.path && child.userData?.objectIndex >= object.index) {
-                child.userData.objectIndex--
-            }
-        }
-    }
-
     process_igz(igz) {
         const showGrass = (localStorage.getItem('explorer-show-grass') ?? 'false') === 'true'
         const show_all_objects = (localStorage.getItem('explorer-show-all-objects') ?? 'false') === 'true'

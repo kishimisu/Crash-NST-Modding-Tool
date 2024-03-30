@@ -14,6 +14,11 @@ class BufferView {
         this.offset += offset
     }
 
+    align(offset) {
+        const align = this.offset % offset
+        if (align != 0) this.skip(offset - align)
+    }
+
     getValue(method, size, offset) {
         this.offset = offset ?? this.offset
 

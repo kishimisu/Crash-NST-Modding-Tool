@@ -1,6 +1,7 @@
+import { writeFileSync } from "fs"
 import { BufferView } from "../utils"
 import HavokSection from "./section"
-import hkObject from "./hkObject"
+import hkObject, { HAVOK_METADATA } from "./hkObject"
 
 const SIGNATURE = 0x10C0C01057E0E057n
 
@@ -8,7 +9,12 @@ class HavokFile {
     constructor(data, path) {
         this.path = path
         this.sections = []
+        this.dataSection = null // => this.sections[2]
         this.objects = []
+
+        this.reader = null
+        this.header = null
+        this.objectsBuffer = null
 
         this.initialize(new Uint8Array(data))
     }
@@ -61,6 +67,12 @@ class HavokFile {
             nextOffset += 64
         }
 
+        /// Store Useful Data ///
+
+        this.dataSection = this.sections[2]
+        this.header = buffer.slice(0, nextOffset)
+        this.objectsBuffer = buffer.slice(this.dataSection.dataOffset, this.dataSection.dataOffset + this.dataSection.fixupOffset)
+
         /// Initialize Fixups ///
 
         for (let i = 0; i < numSections; i++) {
@@ -84,16 +96,11 @@ class HavokFile {
                 vf.name = name
                 vf.globalOffset = section.dataOffset + vf.pointer
             }
-
-            // Sort fixups
-            this.sections[i].virtualFixups.sort((a, b) => a.pointer - b.pointer)
-            this.sections[i].globalFixups.sort((a, b) => a.pointer - b.pointer)
-            this.sections[i].localFixups.sort((a, b) => a.pointer - b.pointer)
         }
 
         /// Create objects ///
 
-        const virtualFixups = this.sections[2].virtualFixups.filter(e => e.pointer != -1)
+        const virtualFixups = this.dataSection.virtualFixups.filter(e => e.pointer != -1)
 
         for (let i = 0; i < virtualFixups.length; i++) {
             const fixupData = virtualFixups[i]
@@ -101,8 +108,8 @@ class HavokFile {
             this.objects.push(object)
         }
 
-        this.objects.forEach((e, i) => e.size = (this.objects[i + 1]?.offset ?? buffer.length) - e.offset)
-        this.objects.forEach(e => e.initialize(this))
+        this.objects.forEach((e, i) => e.rootSize = (this.objects[i + 1]?.offset ?? buffer.length) - e.offset)
+        this.objects.forEach(object => object.initialize(this))
         this.objects.forEach((e, i) => e.index = i)
 
         /// Add index for classes that appear more than once ///
@@ -117,7 +124,66 @@ class HavokFile {
             e.typeCount = (objectsTypeCount[e.type] || 0) + 1
             objectsTypeCount[e.type] = e.typeCount
         })
+    }
 
+    save(filePath) {
+        const sizeApprox = this.dataSection.dataOffset + this.dataSection.calculateEOF() + 2000
+        const buffer = new Uint8Array(sizeApprox)
+        const writer = new BufferView(buffer)
+
+        // Write header
+        buffer.set(this.header)
+        writer.seek(this.header.byteLength)
+
+        // Get class names
+        const classes = [
+            // Mandatory classes
+            { name: 'hkClass',         id: 0x33d42383 },
+            { name: 'hkClassMember',   id: 0xb0efa719 }, 
+            { name: 'hkClassEnum',     id: 0x8a3609cf },
+            { name: 'hkClassEnumItem', id: 0xce6f8a6c },
+
+            // Root objects classes
+            ...this.objects.filter(e => e.root).map(e => ({ 
+                name: e.type, 
+                id: HAVOK_METADATA.types[e.type].id 
+            }))
+        ]
+
+        // Write class names
+        classes.forEach(e => {
+            writer.setUInt(e.id)
+            writer.setByte(0x09)
+            e.offset = writer.offset - 272
+            writer.setChars(e.name)
+            writer.setByte(0x00)
+        })
+        writer.align(16)
+
+        // Update data start offset
+        this.dataSection.dataOffset = writer.offset
+
+        this.dataSection.virtualFixups.forEach(e => {
+            if (e.pointer == -1) return
+            e.classNameOffset = classes.find(c => c.name == e.name).offset
+        })
+
+        // Write data section
+        writer.seek(this.header.byteLength - 64)
+        this.dataSection.save(writer)
+
+        // Write objects
+        buffer.set(this.objectsBuffer, this.dataSection.dataOffset)
+
+        // Resize final buffer
+        const finalSize = this.dataSection.dataOffset + this.dataSection.calculateEOF()
+        const finalData = buffer.slice(0, finalSize)
+
+        if (filePath) {
+            writeFileSync(filePath, finalData)
+        }
+
+        return finalData
     }
 
     /**
@@ -148,7 +214,7 @@ class HavokFile {
         return [
             {
                 text: '[Sections]',
-                children: this.sections.map(e => e.toNodeTree())
+                children: this.sections.map(e => e.toNodeTree(this))
             },
             ...root.map(e => e.toNodeTree())
         ]

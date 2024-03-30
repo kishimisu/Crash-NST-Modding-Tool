@@ -5,8 +5,7 @@ import Fixup from './fixup.js'
 import igObject, { igListHeaderSize } from './igObject.js'
 import ChunkInfo from './chunkInfos.js'
 import Pak from '../pak/pak.js'
-
-import { namespace_hashes, file_types } from '../app/components/utils/metadata.js'
+import { namespace_hashes, file_types, TYPES_METADATA } from '../app/components/utils/metadata.js'
 
 
 const IGZ_VERSION      = 10
@@ -152,7 +151,7 @@ class IGZ {
             const name   = this.fixups.TSTR.data[nameID]
             const object = this.objects.find(e => e.offset == offset)
 
-            if (name == null) throw new Error('Name is null: ' + nameID)
+            if (name == null) throw new Error(`Could not find name for object ${i} at offset ${offset}`)
             if (object == null) return console.warn(`Entry #${i} (offset: ${offset}, name: ${name}) is not present in RVTB`)
 
             object.name = name
@@ -178,7 +177,11 @@ class IGZ {
             const signature = reader.readUInt(reader.offset)
             if (signature == CUSTOM_SIGNATURE) {
                 this.custom_file = true
-                this.objects.forEach(e => e.custom = reader.readByte() == 1)
+                this.objects.forEach(e => {
+                    const value = reader.readByte()
+                    e.custom = value > 0
+                    if (value >> 1) e.original_name_hash = reader.readUInt()
+                })
                 console.log('Custom .igz file detected !')
             }
         }
@@ -187,52 +190,97 @@ class IGZ {
     }
 
     /**
-     * Clone an object and update every fixup and igObjectRef accordingly
+     * Create a new object and add it to the igz file
+     * 
+     * @param {string} type - Object type
+     * @param {string | null} name - Object name (optional)
+     * @returns {igObject} The new object
+     */
+    createObject(type, name) {
+        const lastObject = this.objects[this.objects.length - 2]
+        const offset = lastObject.offset + 4
+
+        this.objects[this.objects.length - 1].offset += 4
+
+        const size = TYPES_METADATA[type].size
+        const data = new Array(size).fill(0)
+
+        const typeID = this.addTMET(type)
+        const nameID = name == null ? -1 : this.addTSTR(name)
+
+        const object = new igObject({ 
+            type, typeID,
+            name, nameID,
+            offset, size, data, 
+            chunk_info: this.chunk_infos[1],
+            global_offset: this.getGlobalOffset(offset),
+            custom: true, updated: true
+        })
+        object.fixups = { RSTT: [], RHND: [], ROFS: [], RNEX: [], REXT: [], RPID: [] }
+        object.view.setInt(typeID, 0)
+
+        this.addObject(object)
+        this.updated = true
+
+        console.log('Created object:', object.getName())
+
+        return object
+    }
+
+    /**
+     * Clone an existing object and add it to the igz file
      * 
      * @param {igObject} object - The object to clone
      */
     cloneObject(object) {
         const createClone = (object) => {
-            const index = this.objects.length - 2
-            const lastObject = this.objects[index]
+            const lastObject = this.objects[this.objects.length - 2]
+            this.objects[this.objects.length - 1].offset += 4
+
             const clone = object.clone(this, lastObject.offset + 4)
-            this.objects = this.objects.slice(0, index + 1).concat(clone, this.objects.slice(index + 1))
+            this.addObject(clone)
 
-            if (clone.nameID != -1) {
-                const length = this.objectList.getList().length
-                this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(clone.name))
-                this.objectList.fixups.ROFS.push(0x28 + 8 * (length))
-                this.nameList.fixups.RSTT.push(0x28 + 16 * (length))
-                this.addHandle(clone.name)
-            }
-
+            console.log('Created object (clone):', clone.getName())
             return clone
         }
 
         const clone = createClone(object)
 
+        const objects = [ clone ]
         const igComponentList = clone.tryGetChild('igComponentList')
+        const igEntityTransform = clone.tryGetChild('igEntityTransform')
+
         if (igComponentList != null) {
             const igClone = createClone(igComponentList)
-            const childIndex = clone.children.findIndex(e => e.object == igComponentList)
-            clone.children[childIndex].object = igClone
-
-            const objectRefIndex = clone.objectRefs.findIndex(e => e.child == igComponentList)
-            clone.objectRefs[objectRefIndex].child = igClone
-
-            const parentIndex = igClone.references.findIndex(e => e == igComponentList)
-            igClone.references[parentIndex] = clone
-
-            this.updateObjects([clone, igClone])
+            const offset = clone.objectRefs.find(e => e.child == igComponentList).offset
+            clone.activateFixup('ROFS', offset, true, igClone)
+            objects.push(igClone)
         }
-        else 
-            this.updateObjects([clone])
+        if (igEntityTransform != null) {
+            const igClone = createClone(igEntityTransform)
+            const offset = clone.objectRefs.find(e => e.child == igEntityTransform).offset
+            clone.activateFixup('ROFS', offset, true, igClone)
+            objects.push(igClone)
+        }
 
         this.updated = true
+        return objects
     }
 
     /**
-     * Rename an object (update in TSTR)
+     * Add an object to the end of the file, before the igNameList
+     * Also adds a handle to the EXNM fixup if the object has a name
+     */
+    addObject(object) {
+        const index = this.objects.length - 2
+        this.objects = this.objects.slice(0, index + 1).concat(object, this.objects.slice(index + 1))
+
+        if (object.nameID != -1)
+            this.addEXNM(object.name)
+    }
+
+    /**
+     * Rename an object (update TSTR)
      * 
      * @param {igObject} object 
      * @param {string} name 
@@ -257,39 +305,85 @@ class IGZ {
     }
 
     /**
-     * Delete an object from the igz file. Update igObjectList and igNameList for named objects.
+     * Delete an object from the igz file
      * 
-     * @param {igObject} object 
+     * @param {igObject} object - The object to delete
+     * @param {boolean} recursive - Delete all (unreferenced) children recursively
      */
-    deleteObject(object) {
+    deleteObject(object, recursive = false) {
         const index = this.objects.indexOf(object)
-        if (index == -1) return console.warn('Object not found:', object.name)
-        
-        if (object.nameID != -1) {
-            this.objectList.fixups.ROFS.pop()
-            this.nameList.fixups.RSTT.pop()
-        }
+        if (index == -1) return console.warn('Object not found, skip delete: ', object.name)
+
+        object.deleted = true
 
         this.updated = true
         this.objects.splice(index, 1)
-        this.updateObjects()
+        console.log('Deleted object:', object.getName())
+
+        if (recursive) {
+            object.children.forEach(e => {
+                if (e.object.references.some(e => e != this.objectList && !e.deleted)) return
+                this.deleteObject(e.object, true)
+            })
+        }
+    }
+
+    /**
+     * Get the index of a string in the TSTR fixup.
+     * Create a new entry if it does not exist.
+     * 
+     * @param {string} name - Entry Name
+     */
+    addTSTR(name) {
+        if (name == null) throw new Error('Name is null')
+
+        const index = this.fixups.TSTR.data.indexOf(name)
+        if (index != -1) return index
+
+        this.fixups.TSTR.data.push(name)
+        return this.fixups.TSTR.data.length - 1
+    }
+
+    /**
+     * Get the index of a type in the TMET fixup.
+     * Create a new entry if it does not exist.
+     * 
+     * @param {string} type - Type name
+     */
+    addTMET(type) {
+        if (type == null) throw new Error('Type is null')
+
+        const index = this.fixups.TMET.data.indexOf(type)
+        if (index != -1) return index
+
+        const size = TYPES_METADATA[type].size
+
+        this.fixups.TMET.updateData(this.fixups.TMET.data.concat(type)) // Add type name
+        this.fixups.MTSZ.updateData(this.fixups.MTSZ.data.concat(size)) // Add type size
+
+        return this.fixups.TMET.data.length - 1
     }
 
     /**
      * Adds a handle to the EXNM fixup and named_handles list
      * 
-     * @param {string} name - Handle name. Must exist in TSTR
+     * @param {string} name - Handle name.
      */
-    addHandle(name) {
+    addEXNM(name) {
+        if (this.fixups.EXNM == null) {
+            console.warn('No EXNM fixup, skipping handle creation for', name)
+            return
+        }
+
         const file = extractName(this.path)
-        if (!this.fixups.TSTR.data.includes(file)) this.fixups.TSTR.updateData(this.fixups.TSTR.data.concat(file))
-        const fileID = this.fixups.TSTR.data.indexOf(file)
-        const objectID = this.fixups.TSTR.data.indexOf(name)
+        const fileID = this.addTSTR(file)
+        const objectID = this.addTSTR(name)
 
         const exnmData = this.fixups.EXNM.extractData().concat([[objectID, (fileID | 0x80000000) >>> 0]])
         this.fixups.EXNM.updateData(exnmData)
         this.fixups.EXNM.data.push([name, 'Handle | ' + file])
         this.named_handles.push([name, file])
+        this.updated = true
     }
 
     /**
@@ -326,21 +420,26 @@ class IGZ {
 
         // Update igObjectList + igNameList
         this.objectList.updateList(namedObjects.map(e => e.offset))
+        this.objectList.fixups.ROFS = [0x20, ...namedObjects.map((e, i) => 0x28 + 8 * i)]
+
         this.nameList.updateList(namedObjects.map(e => [this.fixups.TSTR.data.indexOf(e.name), computeHash(e.name)]).flat())
+        this.nameList.fixups.RSTT = namedObjects.map((e, i) => 0x28 + 16 * i)
 
         // Update fixups
         Object.keys(this.fixups).forEach(fixup => {
             const updateMethod = this['build' + fixup]
             if (updateMethod == null) return
+            
             const data = updateMethod.bind(this)()
-            if (data.length != this.fixups[fixup].data.length) console.log('Updated fixup size for ' + fixup + ' from ' + this.fixups[fixup].data.length + ' to ' + data.length)
             this.fixups[fixup].updateData(data)
         })
+        this.fixups.TSTR.updateData(this.fixups.TSTR.data)
 
         // Update chunk infos
+        const lastObject = this.objects[this.objects.length - 1]
         this.chunk_infos[0].size = Object.values(this.fixups).reduce((a, b) => a + b.size, 0)
         this.chunk_infos[1].offset = this.chunk_infos[0].offset + this.chunk_infos[0].size
-        this.chunk_infos[1].size = this.nameList.offset + this.nameList.size
+        this.chunk_infos[1].size = lastObject.offset + lastObject.size
 
         // Update global offsets
         this.objects.forEach((object, i) => {
@@ -356,7 +455,11 @@ class IGZ {
         this.setupChildrenAndReferences('root', true)
 
         // Calculate file size
-        const fileSize = this.chunk_infos[0].offset + this.chunk_infos.reduce((a, b) => a + b.size, 0) + this.objects.length + 4
+        const fileSize = this.chunk_infos[0].offset 
+                         + this.chunk_infos.reduce((a, b) => a + b.size, 0) 
+                         + this.objects.length 
+                         + this.objects.filter(e => e.custom).length * 4 
+                         + 4
 
         // Write full header
         const buffer = new Uint8Array(this.header.concat(new Array(fileSize - this.header.length).fill(0)))
@@ -381,7 +484,10 @@ class IGZ {
 
         // Write custom data
         writer.setInt(CUSTOM_SIGNATURE)
-        this.objects.forEach(e => writer.setByte(e.custom ? 1 : 0))
+        this.objects.forEach(e => {
+            writer.setByte(e.custom ? 0b11 : 0)
+            if (e.custom) writer.setUInt(e.original_name_hash)
+        })
 
         this.updated = false
         this.objects.forEach(e => e.updated = false)
@@ -483,7 +589,7 @@ class IGZ {
                          .concat('chunk_info')
 
         // Update TSTR
-        this.fixups.TSTR.updateData(new_TSTR)
+        this.fixups.TSTR.data = new_TSTR
 
         // Build new igStreamingChunkInfo data
         const chunk_info_data = []
@@ -706,9 +812,21 @@ class IGZ {
             ['RSTT', 'RHND', 'ROFS', 'RNEX', 'REXT', 'RPID'].forEach(addFixup)
         }
     }
+
+    buildTDEP() {
+        return this.fixups.TDEP.data
+    }
     
+    buildEXID() {
+        return this.fixups.EXID.data.map(([a, b]) => [ typeof(a) == 'string' ? computeHash(a) : a, typeof(b) == 'string' ? computeHash(extractName(b)) : b ])
+    }
+
     buildONAM() {
         return [ this.nameList.offset ]
+    }
+
+    buildNSPC() {
+        return [ this.objects.filter(e => e.type == 'igNameList').pop().offset ]
     }
 
     buildRVTB() {
@@ -802,7 +920,7 @@ class IGZ {
         if (mode == 'root' || mode == 'alchemist') root = this.getRootObjects()
         else if (mode == 'named') root = this.objects.filter(e => e.nameID != -1)
 
-        const custom_objects = this.objects.filter(e => e.custom && e.references.some(r => !r.custom))
+        const custom_objects = this.objects.filter(e => e.custom && !e.references.some(r => r.custom))
         const unreferenced = this.objects.filter(e => e.references.length == 0)
         const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
 
@@ -866,9 +984,7 @@ class IGZ {
         const tree = [{
             text: '[Fixups]',
             children: Object.values(this.fixups).map(e => e.toNodeTree(this.objects)),
-        },
-            ...root
-        ]
+        }]
 
         if (custom_objects.length > 0) {
             tree.push({
@@ -876,6 +992,8 @@ class IGZ {
                 children: custom_objects.map(e => e.toNodeTree())
             })
         }
+
+        tree.push(...root)
 
         if (unreferenced.length > 0) {
             tree.push({

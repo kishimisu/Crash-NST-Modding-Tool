@@ -21,6 +21,7 @@ class hkObject {
         const metadata = HAVOK_METADATA.types[type]
         if (metadata) {
             this.size = metadata.size
+            this.rootSize = metadata.size
             this.fields = metadata.fields.map(e => ({ ...e }))
             this.parentClass = metadata.parent
         }
@@ -30,7 +31,7 @@ class hkObject {
         const { reader } = hkx
 
         // Get object data slice
-        const objectData = reader.buffer.slice(this.offset, this.offset + this.size)
+        const objectData = reader.buffer.slice(this.offset, this.offset + this.rootSize)
         this.view = new BufferView(objectData)
 
         if (this.fields == null) {
@@ -105,15 +106,21 @@ class hkObject {
                 field.memory_active = count > 0
                 field.memType = field.subtype
 
-                if (field.memType == 'TYPE_STRUCT') {
-                    let objectOffset = field.global_offset + offset
-                    for (let i = 0; i < count; i++) {
+                let objectOffset = field.global_offset + offset
+                for (let i = 0; i < count; i++) {
+                    if (field.memType == 'TYPE_STRUCT') {
                         const object = hkx.getObject(field.refType, objectOffset)
                         field.value.push(objectOffset)
                         addChild(object)
                         objectOffset += object.size
                     }
-                }                
+                    else if (field.refType != null) throw new Error('Not implemented')
+                    else {
+                        const typeInfos = HAVOK_METADATA.typeInfos[field.memType]
+                        const value = reader['read' + typeInfos.method](objectOffset)
+                        objectOffset += typeInfos.size
+                    }
+                }
             }
             else if (field.type == 'TYPE_POINTER' || field.type == 'TYPE_STRUCT') {
                 const value  = reader.readUInt()
@@ -220,6 +227,7 @@ function parse_havok_metadata() {
         const name   = readName()
         const parent = readName()
         const size   = readNum()
+        const id = view.readUInt()
 
         const fieldCount = readNum()
         const fields = []
@@ -235,7 +243,7 @@ function parse_havok_metadata() {
             fields.push({ name: '_' + name, offset, size, type, subtype, enumType, refType })
         }
 
-        TYPES[name] = { parent, size, fields }
+        TYPES[name] = { id, parent, size, fields }
     }
 
     return { 

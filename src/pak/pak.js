@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync } from 'fs'
-import { BufferView, formatSize } from "../utils"
+import { BufferView, computeHash, extractName, formatSize } from "../utils"
 import FileInfos from './fileInfos'
 import IGZ from '../igz/igz'
 
@@ -379,6 +379,53 @@ class Pak {
         return this.package_igz?.path.split('/').pop().replaceAll('.igz', '.pak').replaceAll('_pkg', '')
     }
 
+    /**
+     * Find an entry in the StaticCollision.igz dictionary
+     * 
+     * @param {int} objectHash - Object name hash
+     * @param {string} filePath - Object file path
+     * @returns {Object | null} - The corresponding entry or null if it doesn't exist
+     */
+    getCollisionItem(objectHash, filePath) {
+        const namespaceHash = computeHash(extractName(filePath))
+
+        if (this.collisionData == null) {
+            const staticFileInfos = this.files.find(e => e.path.includes('StaticCollision_') && e.path.endsWith('.igz'))
+            this.collisionData = []
+            
+            if (staticFileInfos) {
+                const staticIgz = IGZ.fromFileInfos(staticFileInfos)
+                const dict = staticIgz.objects.find(e => e.type == 'CStaticCollisionHashInstanceIdHashTable')
+                this.collisionData = dict?.extractCollisionData(staticIgz)
+            }
+        }
+
+        return this.collisionData.find(e => e.objectHash == objectHash && e.namespaceHash == namespaceHash)
+    }
+
+    /**
+     * Create a new file in the archive
+     * 
+     * @param {string} path - The path of the file
+     * @param {Uint8Array} data - File content as a byte array
+     */
+    createFile(path, data) {
+        this.files.push(new FileInfos({
+            pak: this,
+            index: this.files.length,
+            data, size: data.length,
+            compression: 0xFFFFFFFF,
+            path: path,
+            full_path: 'temporary/mack/data/win64/output/' + path,
+            original: false,
+            include_in_pkg: false,
+            updated: true
+        }))
+
+        this.updated = true
+        console.log('File created:', path)
+    }
+
     cloneFile(index) {
         const file = this.files[index]
         
@@ -408,9 +455,6 @@ class Pak {
     }
 
     replaceFileWithinPak(index1, index2) {
-        this.files[index1].id = 'will recalculate'
-        this.files[index1].offset = 'will recalculate'
-        this.files[index1].ordinal = 'will recalculate'
         this.files[index1].size = this.files[index2].size
         this.files[index1].compression = this.files[index2].compression
         this.files[index1].data = this.files[index2].data.slice()

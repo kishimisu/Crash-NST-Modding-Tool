@@ -131,15 +131,6 @@ function createMainWindow() {
                     }
                 },
                 {
-                    label: 'Update referenceCount on save',
-                    type: 'checkbox',
-                    checked: store.get('menu-toggle-refcount', true),
-                    click: (e) => {
-                        store.set('menu-toggle-refcount', e.checked)
-                        win.webContents.send('menu-toggle-refcount', e.checked)
-                    }
-                },
-                {
                     type: 'separator'
                 },
                 {
@@ -283,7 +274,7 @@ function createImportModal(event, props) {
  * @param {String[]} extensions Array of enabled file extensions
  * @returns the path to the selected file
  */
-function showOpenFileDialog(event, extensions = ['pak', 'igz']) {
+function showOpenFileDialog(event, extensions = ['pak', 'igz', 'hkx']) {
     const filePath = dialog.showOpenDialogSync({
         properties: ['openFile'],
         filters: [

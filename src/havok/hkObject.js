@@ -98,7 +98,6 @@ class hkObject {
             else if (field.type == 'TYPE_RELARRAY') {
                 const count  = reader.readUInt16()
                 const offset = reader.readUInt16()
-                if (offset > this.size) error(`Offset ${offset} is greater than object size ${this.size}`)
 
                 field.value = []
                 field.element_count = count

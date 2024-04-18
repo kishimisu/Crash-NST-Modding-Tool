@@ -2,16 +2,17 @@
 
 This tool lets you explore and edit .pak archives and .igz files for the PC version of Crash NST.
 
-![demo](./assets/images/demo4.jpg)
+![demo](./assets/images/demo3.jpg)
 
 Some of the features are listed below.
 
 #### PAK Archives:
 - Import .igz files from other archives + automatic dependency import
 - Extract, Clone, Replace, Enable/Disable and Delete files from PAK archives
+- 3D model preview for actors and models files
+- Image preview for texture files
 - Explore havok files (.hkx)
 - Interactive Level Explorer, with some editing capabilities
-- 3D model preview for actors and models files
 - Quickly backup/restore individual levels or the entire game folder
 
 #### IGZ Files:
@@ -130,7 +131,7 @@ Depending on their type, detailed informations are available when hovering the n
 <a name="explorer"></a>
 ## Level Explorer
 
-![demo](./assets/images/demo3.jpg)
+![demo](./assets/images/demo4.jpg)
 
 When loading a pak archive, you have the possibility to open a work-in-progress 3D scene viewer that will scan through all entities of the level files and try to display them using their corresponding model file.
 
@@ -146,7 +147,9 @@ If you've ever played Minecraft, it works like Creative Mode.
 - **Open Level Explorer**: (Ctrl+E) Opens the level explorer for the current archive. This will scan for level files (under the maps/ folder) for `igEntites` (white), `CEntities` (green), `CActors` (yellow) and `CGameEntities` (blue). If it's able to find a corresponding model, it will be loaded in the scene, otherwise a sphere will be displayed at its location.
 Objects that have collision data are indicated by a small yellow tint, while objects without collision are full white.
 
-- **Show Splines**: Whether to show `igSplineControlPoints` (camera paths, bonus platform paths...)
+- **Show textures**: Whether to load textures for models.
+
+- **Show splines**: Whether to show `igSplineControlPoints` (camera paths, bonus platform paths...)
 
 - **Show entity links**: Whether to show links between `CEntities` and their corresponding spawner.
 

@@ -2,6 +2,7 @@ import { writeFileSync, readFileSync } from 'fs'
 import { BufferView, computeHash, extractName, formatSize } from "../utils"
 import FileInfos from './fileInfos'
 import IGZ from '../igz/igz'
+import { file_types } from '../app/components/utils/metadata'
 
 const PAK_VERSION   = 11
 const PAK_SIGNATURE = 0x1A414749
@@ -313,10 +314,31 @@ class Pak {
 
         // Update package file
         if (updated) {
-            const new_data = this.package_igz.updatePKG(pkg_files)
+            // Find the type of each file
+            const types = pkg_files.map(e => {
+                const file = this.files.find(f => e == f.path.toLowerCase())
+                let type = file_types[computeHash(e)]
+
+                if (type == null && file.path.endsWith('.igz')) {
+                    const igz = IGZ.fromFileInfos(file)
+                    type = igz.type
+                    console.log('Replaced unknown type:', file.path, 'with', type)
+                }
+                if (type == null) {
+                    console.warn('Unknown file type:', file.path)
+                    type = 'igx_entites'
+                }
+
+                return type
+            })
+            if (pkg_files.length != types.length) 
+                throw new Error(`Mismatch between file count and types count: ${pkg_files.length} != ${types.length}`)
+
+            const paths_data = new Array(pkg_files.length).fill(0).map((_, i) => ({ path: pkg_files[i], type: types[i] }))
+            const new_pkg_data = this.package_igz.updatePKG(paths_data)
             const package_file = this.files.find(e => e.path == this.package_igz.path)
-            package_file.data = new_data
-            package_file.size = new_data.length
+            package_file.data = new_pkg_data
+            package_file.size = new_pkg_data.length
             package_file.compression = 0xFFFFFFFF
             package_file.original = false
             package_file.updated = true
@@ -442,10 +464,10 @@ class Pak {
 
     cloneFile(index) {
         const file = this.files[index]
-        
-        const updatePath = (str) => str.slice(0, str.lastIndexOf('.')) + '_Copy' + str.slice(str.lastIndexOf('.'))
+        const igz = IGZ.fromFileInfos(file)
+        const new_data = igz.save()
 
-        const new_data = file.getUncompressedData()
+        const updatePath = (str) => str.slice(0, str.lastIndexOf('.')) + '_Copy' + str.slice(str.lastIndexOf('.'))
 
         const new_file = new FileInfos({ 
             ...this.files[index],

@@ -22,6 +22,11 @@ class Fixup {
         return this.type.startsWith('R') && this.type != 'ROOT'
     }
 
+    // Whether to write the fixup when saving the file
+    isActive() {
+        return this.item_count > 0 || this.type == 'TSTR'
+    }
+
     // Read fixup content from a BufferView
     static fromBuffer(igz, reader) {
         // Get fixup type

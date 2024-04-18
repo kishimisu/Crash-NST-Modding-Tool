@@ -151,6 +151,15 @@ function createMainWindow() {
                     type: 'separator'
                 },
                 {
+                    label: 'Show textures',
+                    type: 'checkbox',
+                    checked: store.get('menu-toggle-show-textures', false),
+                    click: (e) => {
+                        store.set('menu-toggle-show-textures', e.checked)
+                        win.webContents.send('menu-toggle-show-textures', e.checked)
+                    }
+                },
+                {
                     label: 'Show splines',
                     type: 'checkbox',
                     checked: store.get('menu-toggle-show-splines', true),

@@ -2,7 +2,7 @@ import HavokFile from "../../../havok/havok"
 import { computeHash, extractName } from "../../../utils"
 import hkxCollisionTemplate from "../../../../assets/crash/collision_template.hkx"
 
-function addCollisionToObject(object, callback) {
+function addCollisionToObject(pak, igz, object, callback) {
     if (object.type != 'igEntity') throw new Error('Object is not an igEntity')
     
     // Get model TSTR index
@@ -12,33 +12,33 @@ function addCollisionToObject(object, callback) {
     const string_index = CModelComponentData.view.readUInt(0x18)
 
     // Find corresponding .igz and .hkx files
-    const namespace = extractName(Main.igz.fixups.TSTR.data[string_index].replaceAll('\\', '/'))
-    const model_file = Main.pak.files.find(e => extractName(e.path) == namespace && e.path.endsWith('.igz'))
-    const collision_file = Main.pak.files.find(e => extractName(e.path) == namespace && e.path.endsWith('.hkx'))
+    const namespace = extractName(igz.fixups.TSTR.data[string_index].replaceAll('\\', '/'))
+    const model_file = pak.files.find(e => extractName(e.path) == namespace && e.path.endsWith('.igz'))
+    const collision_file = pak.files.find(e => extractName(e.path) == namespace && e.path.endsWith('.hkx'))
 
     // Create collision file if it doesn't exist
     if (collision_file == null) {
         callback('Constructing collision file...')
 
         const objectHash = object.original_name_hash ?? computeHash(object.name)
-        createCollisionFile(Main.pak, objectHash, Main.igz.path, model_file.path)
+        createCollisionFile(pak, objectHash, igz.path, model_file.path)
     }
 
     // Create CGameEntity
-    const CGameEntity     = Main.igz.createObject('CGameEntity', object.name)
-    const CGameEntityData = Main.igz.createObject('CGameEntityData', object.name + '_entityData')
-    const igComponentList = Main.igz.createObject('igComponentList')
+    const CGameEntity     = igz.createObject('CGameEntity', object.name)
+    const CGameEntityData = igz.createObject('CGameEntityData', object.name + '_entityData')
+    const igComponentList = igz.createObject('igComponentList')
     const newObjects = [CGameEntity, CGameEntityData, igComponentList]
 
     // Add path without extension to TSTR
-    const str_id = Main.igz.addTSTR(model_file.path.slice(0, -4))
+    const str_id = igz.addTSTR(model_file.path.slice(0, -4))
 
     const position  = object.view.readVector(3, 0x20)
     const transform = object.tryGetChild('igEntityTransform')
 
     // Copy previous transform
     if (transform) {
-        const [igEntityTransform] = Main.igz.cloneObject(transform)
+        const [igEntityTransform] = igz.cloneObject(transform)
         CGameEntity.activateFixup('ROFS', 0x30, true, igEntityTransform)
         newObjects.push(igEntityTransform)
     }
@@ -60,13 +60,12 @@ function addCollisionToObject(object, callback) {
     CGameEntityData.activateFixup('RSTT', 0x48, true, str_id) // _modelName
 
     // Delete igEntity
-    Main.igz.deleteObject(object, true)
+    igz.deleteObject(object, true)
 
     callback('Updating IGZ...')
 
     // Update IGZ
-    Main.igz.updateObjects(newObjects)
-    Main.igz.setupChildrenAndReferences(localStorage.getItem('display-mode'), true)
+    igz.updateObjects(newObjects)
 
     return CGameEntity
 }

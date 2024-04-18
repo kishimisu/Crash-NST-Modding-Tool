@@ -484,7 +484,8 @@ class ObjectField {
         const isHandle = index & 0x80000000
 
         const mapName = (type) => (name, id) => ({ name: name[0], path: name[1], id, type })
-        const names = isHandle ? Main.igz.named_handles.map(mapName('EXNM')) : exid.map(mapName('EXID'))
+        const names = !inRHND ? Main.igz.named_handles.map(mapName('EXNM')).concat(exid.map(mapName('EXID'))) 
+                              : isHandle ? Main.igz.named_handles.map(mapName('EXNM')) : exid.map(mapName('EXID'))
         const short_names = names.map(e => `${typeof(e) == 'string' ? e.path.slice(e.path.lastIndexOf('/') + 1) : e.path}::${e.name}`)
         const full_names  = names.map(e => `|${e.type}| ${e.path} :: ${e.name}`)
 
@@ -505,7 +506,13 @@ class ObjectField {
         // Name index => Handle ID
         const encodeIndex = (name) => {
             const name_id = full_names.indexOf(name)
-            if (name_id == -1) return 0
+
+            input.style.color = name_id != -1 ? '' : '#bbb'
+
+            if (name_id == -1) {
+                this.object.activateFixup('RHND', this.offset, false)
+                return 0
+            }
 
             let fixup_id = names[name_id].id
             if (names[name_id].type === 'EXNM') {
@@ -515,15 +522,17 @@ class ObjectField {
                 const object = Main.igz.objects.find(e => e.name == names[name_id].name)
                 if (object != null) this.createFocusEvent(object)
             }
+
+            this.object.activateFixup('RHND', this.offset, true, fixup_id)
+
             return fixup_id
         }
 
         const value = inRHND ? decodeIndex(index) : '--- None ---'
         const input = this.createCustomListInput([short_names, full_names], value)
 
-        // TODO: Entry should be added to RHND if it's not there
-        if (!inRHND) input.disabled = true
         this.colorized = inRHND
+        input.style.color = this.colorized ? '' : '#bbb'
         input.onchange = () => this.onChange(encodeIndex(input.value))
 
         return input
@@ -735,6 +744,7 @@ class ObjectField {
             'igRawRefMetaField':        8,
             'igSizeTypeMetaField':      8,
             'DotNetDataMetaField':      8,
+            'ChunkFileInfoMetaField':   8,
             'igVec2fMetaField':         8,
             'igVec3fMetaField':         12,
             'igVertexElementMetaField': 12,
@@ -800,6 +810,7 @@ class ObjectField {
         return [
             'igStringMetaField',
             'igNameMetaField',
+            'ChunkFileInfoMetaField'
         ].includes(type ?? this.type)
     }
 

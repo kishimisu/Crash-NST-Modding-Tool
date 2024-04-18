@@ -123,7 +123,7 @@ class Main {
         this.treeMode = hkx ? 'hkx' : 'igz'
 
         tree.load([]) 
-        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode')))
+        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
         
         if (hkx || tree.nodes().length == 3) tree.get(1).expand()
 
@@ -166,7 +166,7 @@ class Main {
         const root = this.treeMode === 'igz' ? this.igz : this.hkx
         this.saveTreeExpandedState(this.treeMode)
         tree.load([])
-        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode')))
+        tree.load(root.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
         this.colorizeMainTree()
         this.updateTitle()
         this.restoreTreeExpandedState(this.treeMode)
@@ -287,7 +287,7 @@ class Main {
                 
                 igz = IGZ.fromFileInfos(pak.files[fileIndex])
                 igz.setupEXID(getArchiveFolder(), pak)
-                igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
+                igz.setupChildrenAndReferences(localStorage.getItem('display-mode') ?? 'root')
 
                 if (showProgress) ipcRenderer.send('set-progress-bar', null)
             }
@@ -306,7 +306,7 @@ class Main {
 
         this.igz = igz
         
-        treePreview.load(igz.toNodeTree(false, localStorage.getItem('display-mode')))
+        treePreview.load(igz.toNodeTree(false, localStorage.getItem('display-mode') ?? 'root'))
         this.colorizeMainTree(treePreview)
         if (treePreview.nodes().length == 3) treePreview.get(1).expand()
     }
@@ -333,7 +333,7 @@ class Main {
         }
         this.igz = null
 
-        treePreview.load(this.hkx.toNodeTree(false, localStorage.getItem('display-mode')))
+        treePreview.load(this.hkx.toNodeTree(false, localStorage.getItem('display-mode') ?? 'root'))
         treePreview.get(1).expand()
         this.colorizeMainTree(treePreview)
     }
@@ -353,7 +353,7 @@ class Main {
         try {
             if (pak == this.levelExplorer.pak && this.levelExplorer.mode == 'level' && !this.levelExplorer.visible)
                 return this.levelExplorer.toggleVisibility(true)
-            this.levelExplorer.init()
+            this.levelExplorer.init(true)
         } catch (e) {
             ipcRenderer.send('set-progress-bar', null)
             ipcRenderer.send('show-error-message', 'An error occurred while loading the level explorer', e.message)
@@ -403,7 +403,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.23 - '
+        const title = 'The Apprentice v1.2 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -519,6 +519,11 @@ function onNodeClick(event, node)
                 const igz = IGZ.fromFileInfos(file)
                 igz.setupChildrenAndReferences()
                 Main.levelExplorer.showModelScene(igz)
+            }
+            else if (file.path.startsWith('textures/') && file.path.endsWith('.igz')) {
+                const igz = IGZ.fromFileInfos(file)
+                igz.setupEXID(getArchiveFolder(), pak)
+                Main.levelExplorer.showTexture(igz)
             }
 
             elm('#include-in-pkg').checked = file.include_in_pkg
@@ -678,7 +683,7 @@ function loadIGZ(filePath)
         Main.setPak(null)
         igz = IGZ.fromFile(filePath)
         igz.setupEXID(getArchiveFolder())
-        igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
+        igz.setupChildrenAndReferences(localStorage.getItem('display-mode') ?? 'root')
         Main.igz = igz
         Main.showIGZTree()
 
@@ -857,7 +862,7 @@ function cloneObject() {
     Main.igz.updateObjects(newObjects)
     
     tree.load([]) 
-    tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode')))
+    tree.load(igz.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
     Main.colorizeMainTree()
     Main.restoreTreeExpandedState('igz')
 
@@ -884,6 +889,12 @@ function renameObject() {
 
     const onRename = (name) => {
         name = name.split(':').pop().trim()
+
+        if (Main.igz.objects.some(e => e.name == name)) {
+            ipcRenderer.send('show-warning-message', 'An object with this name already exists.')
+            return
+        }
+
         Main.igz.renameObject(object, name)
         Main.pak.updated = true
         const node = tree.available().find(e => e.type == 'object' && e.objectIndex === object.index)
@@ -927,7 +938,7 @@ function deleteObject() {
     Main.igz.deleteObject(object, true)
     Main.igz.updateObjects()
     tree.load([])
-    tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode')))
+    tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
     Main.colorizeMainTree()
     Main.lastFileIndex.igz = null
     Main.restoreTreeExpandedState('igz')
@@ -943,13 +954,14 @@ function addCollision() {
         const progressCallback = (message) =>
             ipcRenderer.send('set-progress-bar', 1, null, 'Adding collision to object', message, 'Adding collision to object...')
         
-        const newObject = addCollisionToObject(Main.objectView.object, progressCallback)
+        const newObject = addCollisionToObject(Main.pak, Main.igz, Main.objectView.object, progressCallback)
+        Main.igz.setupChildrenAndReferences(localStorage.getItem('display-mode') ?? 'root', true)
         
         ipcRenderer.send('set-progress-bar', null)
 
         Main.saveTreeExpandedState('igz')
         Main.tree.load([])
-        Main.tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode')))
+        Main.tree.load(Main.igz.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
         Main.colorizeMainTree()
         Main.restoreTreeExpandedState('igz')
         Main.updateTitle()
@@ -1406,6 +1418,7 @@ ipcRenderer.on('menu-toggle-endian', (_, checked) => toggleEndian(checked))
 
 ipcRenderer.on('menu-open-explorer', () => Main.initLevelExplorer())
 ipcRenderer.on('menu-set-model-extractor-path', () => changeModelExtractorPath())
+ipcRenderer.on('menu-toggle-show-textures', (_, checked) => Main.levelExplorer.toggleShowTextures(checked))
 ipcRenderer.on('menu-toggle-show-splines', (_, checked) => Main.levelExplorer.toggleShowSplines(checked))
 ipcRenderer.on('menu-toggle-show-entity-links', (_, checked) => Main.levelExplorer.toggleShowEntityLinks(checked))
 ipcRenderer.on('menu-toggle-show-grass', (_, checked) => Main.levelExplorer.toggleShowGrass(checked))

@@ -1,7 +1,7 @@
 {
   "name": "the-apprentice",
   "productName": "The Apprentice",
-  "version": "1.13.0",
+  "version": "1.25.0",
   "description": "A tool for modding Crash NST PC",
   "main": ".webpack/main",
   "scripts": {
@@ -40,6 +40,7 @@
   "dependencies": {
     "@electron-forge/publisher-github": "^7.2.0",
     "buffer-loader": "^0.1.0",
+    "dxt-js": "^0.0.3",
     "electron-progressbar": "^2.1.0",
     "electron-squirrel-startup": "^1.0.0",
     "electron-store": "^8.1.0",

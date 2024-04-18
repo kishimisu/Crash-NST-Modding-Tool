@@ -496,11 +496,21 @@ td.hex-flash {
 #explorer {
   display: none;
   position: relative;
+  justify-content: center;
 }
 
-#explorer > canvas {
+#canvas {
   width: 100%;
   aspect-ratio: 16/9;
+}
+
+#canvas-2d {
+  display: none;
+  width: auto;
+  height: auto;
+  min-width: 85%;
+  max-width: 100%;
+  max-height: 400px;
 }
 
 #hide-explorer {

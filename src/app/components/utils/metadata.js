@@ -203,7 +203,7 @@ function getAllInheritedChildren(type, all_children = new Set()) {
             getAllInheritedChildren(child, all_children)
     }
 
-    return children
+    return all_children
 }
 
 export {

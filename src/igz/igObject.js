@@ -1,10 +1,10 @@
 import { TYPES_METADATA, VSC_METADATA } from "../app/components/utils/metadata.js"
-import { BufferView, computeHash } from "../utils.js"
+import { BufferView, computeHash, extractName } from "../utils.js"
 
 const igListHeaderSize = 40
 
 class igObject {
-    constructor({index, offset, global_offset, chunk_info, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = [], updated = false, custom = false}) {
+    constructor({index, offset, global_offset, chunk_info, size = -1, type = '', typeID = -1, name = '', nameID = -1, data = [], updated = false, custom = false, original = false}) {
         this.index = parseInt(index) // Order of appearance in RVTB fixup
         this.offset = offset               // Offset relative to chunk 1
         this.global_offset = global_offset // Offset relative to file start
@@ -26,20 +26,31 @@ class igObject {
         this.referenceCount = 0    // Reference count (using refCounted)
         this.dynamicObject = false // Dynamic object? (contains MetaObject)
         this.invalid = null        // null | string (reason)
-        this.updated = updated
-        this.custom = custom
+
+        this.updated = updated   // Updated since last save?
+        this.custom = custom     // Custom object? (not in original file)
+        this.original = original // Original object? (same data as original un-modded object)
 
         this.objectRefs = [] // igObjectRef references
         this.fixups = { RSTT: [], RHND: [], ROFS: [], RNEX: [], REXT: [], RPID: [] } // Fixups references
     }
 
-    clone(igz, offset) {
+    clearFixups() {
+        this.fixups = { RSTT: [], RHND: [], ROFS: [], RNEX: [], REXT: [], RPID: [] }
+        this.objectRefs = []
+    }
+
+    clone(igz, offset, name, igzOut) {
+        igzOut ??= igz
         const fields = this.getFieldsMetadata(igz)
         const sizeMetadata = fields[fields.length - 1].offset + fields[fields.length - 1].size
         const sizeMTSZ = igz.fixups.MTSZ.data[this.typeID]
         const memories = fields.filter(e => e.type == 'igMemoryRefMetaField')
                                .map(field => ({field, mem_infos: this.extractMemoryData(igz, field.offset)}))
                                .filter(e => e.mem_infos.active)
+        
+        if (igz != igzOut)
+            this.updateDependencies(igz, igzOut)
         
         let size = this.dynamicObject ? sizeMetadata : sizeMTSZ                 
         let data = Array.from(this.data.slice(0, size))
@@ -51,30 +62,36 @@ class igObject {
 
             memory.memory_data_offset = offset + data.length
             data = data.concat(Array.from(bytes))
+            if (data.length % 16 != 0) data = data.concat(Array(16 - data.length % 16).fill(0))
         }
+        if (data.length % 16 != 0) data = data.concat(Array(16 - data.length % 16).fill(0))
+
 
         const object = new igObject({
             data: new Uint8Array(data),
             size: data.length,
             offset: offset,
-            global_offset: igz.getGlobalOffset(offset),
+            global_offset: igzOut.getGlobalOffset(offset),
             chunk_info: this.chunk_info,
+            name,
             type: this.type,
             typeID: this.typeID,
-            name: this.name,
-            nameID: this.nameID,
             custom: true,
             updated: true
         })
 
-        if (this.nameID != -1) object.name += '_cloned'
-        
-        object.original_name_hash = this.original_name_hash ?? computeHash(this.name)
-        
-        for (let i = igz.objects.length - 1; i >= 0; i--) {
-            if (igz.objects[i].typeID == this.typeID) {
-                object.typeCount = igz.objects[i].typeCount + 1
-                break
+        const typeID = igzOut.addTMET(this.type)
+        object.typeID = typeID
+        object.view.setInt(typeID, 0)
+
+        if (name != null)
+            object.original_name_hash = this.original_name_hash ?? computeHash(name)
+        else {
+            for (let i = igzOut.objects.length - 1; i >= 0; i--) {
+                if (igzOut.objects[i].typeID == this.typeID) {
+                    object.typeCount = igzOut.objects[i].typeCount + 1
+                    break
+                }
             }
         }
         
@@ -96,12 +113,18 @@ class igObject {
             if (field.memType == 'igObjectRefMetaField') {
                 for (let i = 0; i < data.length; i++) {
                     const inROFS = parent.fixups.ROFS.includes(relative_parent_offset + i * 4)
-                    if (!inROFS) continue
+                    const inRNEX = parent.fixups.RNEX.includes(relative_parent_offset + i * 4)
 
-                    const ref = data[i]
-                    const child = igz.findObject(ref)
-                    object.objectRefs.push({ child, offset: relative_offset + i * 4, relative_offset: ref - child.offset })
-                    object.fixups.ROFS.push(relative_offset + i * 4)
+                    if (inRNEX) {
+                        object.fixups.RNEX.push(relative_offset + i * 4)
+                        continue
+                    }
+                    else if (inROFS) {
+                        const ref = data[i]
+                        const child = igz.findObject(ref)
+                        object.objectRefs.push({ child, offset: relative_offset + i * 4, relative_offset: ref - child.offset })
+                        object.fixups.ROFS.push(relative_offset + i * 4)
+                    }
                 }
             }
             else if (field.memType == 'igStringMetaField') {
@@ -112,6 +135,14 @@ class igObject {
                     object.fixups.RSTT.push(relative_offset + i * 4)
                 }
             }
+            else if (field.memType == 'igHandleMetaField') {
+                for (let i = 0; i < data.length; i++) {
+                    const inRHND = parent.fixups.RHND.includes(relative_parent_offset + i * 4)
+                    if (!inRHND) continue
+
+                    object.fixups.RHND.push(relative_offset + i * 4)
+                }
+            }
 
             // Update memory ref
             const objectRef = object.objectRefs.find(e => e.offset == field.offset + 8)
@@ -120,6 +151,113 @@ class igObject {
         }
 
         return object
+    }
+
+    getAllChildrenRecursive(parents = new Set()) {
+        let children = this.children.map(e => e.object)
+
+        for (const child of this.children) {
+            if (parents.has(child.object.index)) continue
+            parents.add(child.object.index)
+            children = children.concat(child.object.getAllChildrenRecursive(parents))
+        }
+
+        return children
+    }
+
+    updateDependencies(igz, newIGZ) {
+        const fields = this.getFieldsMetadata(igz)
+        const EXID = igz.fixups.EXID.extractData()
+
+        for (const field of fields) 
+        {
+            const addRHND = (parent, offset) => {
+                const inRHND = parent.fixups.RHND.includes(offset)
+                if (!inRHND) return
+
+                const index = parent.view.readInt(offset)
+                const isHandle = (index & 0x80000000) != 0
+                const data = isHandle ? igz.named_handles : EXID
+
+                const handle = (index & 0x7FFFFFFF) >>> 0
+                const [object_name, file_path] = data[handle]
+
+                if (isHandle) {
+                    let path = file_path == extractName(igz.path) ? extractName(newIGZ.path) : file_path
+                    const newIndex = newIGZ.addNamedHandle(object_name, path)
+                    parent.view.setInt(newIndex | 0x80000000, offset)
+                }
+                else {
+                    const newIndex = newIGZ.addEXID(object_name, file_path)
+                    parent.view.setInt(newIndex, offset)
+                }
+            }
+
+            const addRNEXorREXT = (parent, offset) => {
+                const inRNEX = parent.fixups.RNEX.includes(offset)
+                const inREXT = parent.fixups.REXT.includes(offset)
+                if (!inRNEX && !inREXT) return
+                if (inREXT) return console.warn('REXT not implemented')
+
+                const index = parent.view.readInt(offset)
+
+                const [name, file] = igz.named_externals[index]
+
+                const newIndex = newIGZ.addNamedExternal(name, file)
+                parent.view.setInt(newIndex, offset)
+            }
+
+            if (field.type == 'igMemoryRefMetaField') 
+            {
+                if (field.memType == 'igStringMetaField' || field.memType == 'igNameMetaField') 
+                {
+                    const { data, active, parent, relative_offset } = this.extractMemoryData(igz, field.offset, 8)
+                    if (!active) continue
+
+                    for (let i = 0; i < data.length; i++) {
+                        const inRSTT = parent.fixups.RSTT.includes(relative_offset + i * 8)
+                        if (!inRSTT) continue
+
+                        const newIndex = newIGZ.addTSTR(igz.fixups.TSTR.data[data[i]])
+                        parent.view.setInt(newIndex, relative_offset + i * 8)
+                    }
+                }
+                else if (field.memType == 'igHandleMetaField') {
+                    const { data, active, parent, relative_offset } = this.extractMemoryData(igz, field.offset, 8)
+                    if (!active) continue
+
+                    for (let i = 0; i < data.length; i++) {
+                        addRHND(parent, relative_offset + i * 8)
+                    }
+                }
+                else if (field.memType == 'igObjectRefMetaField') {
+                    const { data, active, parent, relative_offset } = this.extractMemoryData(igz, field.offset, 8)
+                    if (!active) continue
+
+                    for (let i = 0; i < data.length; i++) {
+                        addRNEXorREXT(parent, relative_offset + i * 8)
+                    }
+                }
+            }
+            else if (field.type == 'igStringMetaField' || field.type == 'igNameMetaField') 
+            {
+                const inRSTT = this.fixups.RSTT.includes(field.offset)
+                if (!inRSTT) continue
+
+                const index = this.view.readInt(field.offset)
+
+                const newIndex = newIGZ.addTSTR(igz.fixups.TSTR.data[index])
+                this.view.setInt(newIndex, field.offset)
+            }
+            else if (field.type == 'igObjectRefMetaField') 
+            {
+                addRNEXorREXT(this, field.offset)
+            }
+            else if (field.type == 'igHandleMetaField')
+            {
+                addRHND(this, field.offset)
+            }
+        }
     }
 
     isListType() {
@@ -159,7 +297,7 @@ class igObject {
         const element_size = 8
         const count = this.type == 'igObjectList' ? list.length : list.length / 2
         const data_size = list.length * element_size
-        // console.log('Updating list:', this.getName(), this.size, '->', igListHeaderSize + data_size, {old: this.getList(), new: list})
+        // console.log('Updating list:', this.getName(), this.size, '->', igListHeaderSize + data_size, this, {old: this.getList(), new: list})
 
         this.size = igListHeaderSize + data_size
         this.data = new Uint8Array(this.size).map((e, i) => i < this.data.length ? this.data[i] : 0)
@@ -214,7 +352,7 @@ class igObject {
      * @returns {boolean} - True if the fixup was updated, false otherwise
      */
     activateFixup(fixup, offset, active, child, relative_offset = 0) {
-        if (!['ROFS', 'RSTT'].includes(fixup)) 
+        if (!['ROFS', 'RSTT', 'RHND'].includes(fixup)) 
             console.warn('activateFixup: Fixup not implemented:', fixup)
 
         if (active) {
@@ -232,7 +370,7 @@ class igObject {
                     this.objectRefs[id] = { child, relative_offset, offset}
                 }
             }
-            else if (fixup == 'RSTT')
+            else if (fixup == 'RSTT' || fixup == 'RHND')
                 this.view.setUInt(child, offset)
     
             return true
@@ -249,7 +387,7 @@ class igObject {
             if (fixup == 'ROFS') {
                 this.objectRefs.splice(id, 1)
             }
-            else if (fixup == 'RSTT')
+            else if (fixup == 'RSTT' || fixup == 'RHND')
                 this.view.setUInt(0, offset)
             
             return true
@@ -274,15 +412,8 @@ class igObject {
         if (this.data.length != this.size) throw new Error('Data size mismatch: ' + this.data.length + ' != ' + this.size)
         if (this.offset != writer.offset - chunk0_offset) throw new Error('Invalid list offset: ' + this.offset + ' != ' + (writer.offset - chunk0_offset))
 
-        if (this.isListType()) {
-            const new_offset   = this.offset + igListHeaderSize
-            this.view.setInt(new_offset, 32)
-        }
-
-        for (let k = 0; k < this.size; k += 4) {
-            const value = this.view.readInt(k)
-            writer.setInt(value)
-        }
+        writer.buffer.set(this.view.buffer, writer.offset)
+        writer.offset += this.size
     }
 
     /**

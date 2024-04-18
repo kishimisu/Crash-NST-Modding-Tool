@@ -177,8 +177,13 @@ function computeHash(name) {
  * Extracts a file name from its path, without the extension
  */
 function extractName(str) {
-    str = str.slice(str.lastIndexOf('/') + 1)
-    str = str.slice(0, str.lastIndexOf('.'))
+    let lastSlash = str.lastIndexOf('/')
+    if (lastSlash == -1) lastSlash = str.lastIndexOf('\\')
+    if (lastSlash != -1) str = str.slice(lastSlash + 1)
+
+    let lastDot = str.lastIndexOf('.')
+    if (lastDot != -1) str = str.slice(0, str.lastIndexOf('.'))
+    
     return str
 }
 

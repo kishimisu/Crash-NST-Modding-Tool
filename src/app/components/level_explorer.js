@@ -1,5 +1,4 @@
-import { AmbientLight, DirectionalLight, MeshBasicMaterial, MeshPhongMaterial, PerspectiveCamera, Scene, WebGLRenderer, Vector3, Raycaster, Vector2, Euler, Mesh, SphereGeometry, DoubleSide, FogExp2, BufferGeometry, Float32BufferAttribute, Group, Color } from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader'
+import { AmbientLight, DirectionalLight, MeshBasicMaterial, MeshPhongMaterial, PerspectiveCamera, Scene, WebGLRenderer, Vector3, Raycaster, Vector2, Euler, Mesh, SphereGeometry, DoubleSide, FogExp2, BufferGeometry, Float32BufferAttribute, Group, Color, DataTexture, RGBAFormat, UnsignedByteType, RepeatWrapping } from 'three'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
@@ -8,8 +7,9 @@ import { elm, getArchiveFolder } from './utils/utils'
 import IGZ from '../../igz/igz'
 import ObjectView from './object_view'
 import { ipcRenderer } from 'electron'
-import { extractModelData } from './utils/model_extract';
+import { extractDrawcallTextureData, extractModelData } from './utils/model_extract';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { extractName } from '../../utils';
 
 class LevelExplorer {
     constructor() {
@@ -19,6 +19,13 @@ class LevelExplorer {
         this.models = {}
 
         elm('#focus-in-explorer').addEventListener('click', () => this.focusObject(Main.objectView.object))
+
+        window.addEventListener('keydown', function(e) {
+            // Prevent spacebar from scrolling
+            if(e.target == document.body && e.code == 'Space') {
+              e.preventDefault()
+            }
+        })
     }
 
     focusObject(object, updateCamera = true) {
@@ -36,6 +43,12 @@ class LevelExplorer {
                 this.cam.lookAt(match.position)
             }
             this.transformControls.attach(match)
+
+            this.lastObject?.children?.forEach(e => e.material.color.set(this.lastColor))
+            this.lastObject = match
+            this.lastColor = match.children?.length > 0 ? match.children[0].material.color.clone() : match.material.color.clone()
+            match.children?.forEach(e => e.material.color.set(0xeda93b))
+
             this.renderer.render(this.scene, this.cam)
         }
     }
@@ -43,8 +56,15 @@ class LevelExplorer {
     toggleVisibility(visible) {
         elm('#explorer').style.display = visible ? 'block' : 'none'
         elm('#data-table-ctn').style.display = visible ? 'none' : 'block'
+        elm('#canvas').style.display = visible ? 'block' : 'none'
+        elm('#canvas-2d').style.display = 'none'
         this.visible = visible
         if (!visible) this.deselectObject()
+    }
+
+    toggleShowTextures(checked) {
+        localStorage.setItem('explorer-show-textures', checked)
+        if (this.initialized) this.init()
     }
 
     toggleShowSplines(checked) {
@@ -111,6 +131,8 @@ class LevelExplorer {
         for (let j = 0; j < drawCalls.length; j++) {
             const drawCall = drawCalls[j]
             const mesh = this.createMesh(drawCall)
+            if (mesh == null) continue
+
             boundsMin = drawCall.vertexData.reduce((acc, e) => acc.map((v, i) => Math.min(v, e.position[i])), boundsMin)
             boundsMax = drawCall.vertexData.reduce((acc, e) => acc.map((v, i) => Math.max(v, e.position[i])), boundsMax)
             group.add(mesh)
@@ -129,6 +151,35 @@ class LevelExplorer {
             this.model_controls.update()
             this.renderer.render(scene, cam)
         })
+    }
+
+    showTexture(igz) {
+        const igImage = igz.objects.find(e => e.type == 'igImage2')
+        if (!igImage) return console.warn('No igImage2 object found in', igz.path)
+
+        const { pixels, width, height } = igImage.extractTexture(igz)
+
+        const canvas = elm('#canvas-2d')
+        elm('#explorer').style.display = 'flex'
+        elm('#canvas').style.display = 'none'
+        canvas.width = width
+        canvas.height = height
+        canvas.style.display = 'block'
+        canvas.style.aspectRatio = `${width}/${height}`
+
+        const ctx = canvas.getContext('2d')
+        const imageData = ctx.createImageData(width, height)
+        const image = new ImageData(width, height)
+    
+        for (let i = 0; i < pixels.length; i++) {
+            imageData.data[i] = pixels[i]
+        }
+        
+        ctx.putImageData(imageData, 0, 0)
+        image.data.set(imageData.data)
+
+        canvas.style.transform = 'scale(1, -1)'
+        this.visible = false
     }
 
     clearModelScene() {
@@ -169,13 +220,12 @@ class LevelExplorer {
         requestAnimationFrame(() => this.onResize())
     }
 
-    init() {
+    init(reset_camera_location = false) {
         if (!this.initialized) {
             if (!this.renderer) this.initRenderer()
             this.scene = new Scene()
             this.cam = new PerspectiveCamera(75, canvas.width / canvas.height, 1, 50000)
             this.cam.position.set(-40, 600, -1000)
-            this.cam.rotation.set(0, Math.PI, 0)
 
             this.transformControls = new TransformControls(this.cam, this.renderer.domElement)
             this.transformControls.setMode('translate')
@@ -202,11 +252,10 @@ class LevelExplorer {
             
             this.controls = new NoClipControls(this)
             
-            this.loader = new FBXLoader()
             this.raycaster = new Raycaster()
 
-            let lastObject = null
-            let lastColor  = null
+            this.lastObject = null
+            this.lastColor  = null
 
             window.editor = this
 
@@ -228,11 +277,11 @@ class LevelExplorer {
                     const object =  intersects.map(e => e.object).find(e => e.userData.igz != null)
                                  ?? intersects.map(e => e.object.parent).find(e => e.userData.igz != null)
 
-                    lastObject?.children?.forEach(e => e.material.color.set(lastColor))
+                    this.lastObject?.children?.forEach(e => e.material.color.set(this.lastColor))
 
                     if (object != null) {
-                        lastObject = object
-                        lastColor = object.children?.length > 0 ? object.children[0].material.color.clone() : object.material.color.clone()
+                        this.lastObject = object
+                        this.lastColor = object.children?.length > 0 ? object.children[0].material.color.clone() : object.material.color.clone()
 
                         const objectData = object.userData
                         
@@ -249,7 +298,7 @@ class LevelExplorer {
                             try {
                                 Main.setIGZ(IGZ.fromFileInfos(fileInfos))
                                 Main.igz.setupEXID(getArchiveFolder(), Main.pak)
-                                Main.igz.setupChildrenAndReferences(localStorage.getItem('display-mode'))
+                                Main.igz.setupChildrenAndReferences(localStorage.getItem('display-mode') ?? 'root')
                             }
                             catch (e) {
                                 console.error(e)
@@ -308,76 +357,86 @@ class LevelExplorer {
         const mapFiles   = []
         const showGrass = (localStorage.getItem('explorer-show-grass') ?? 'false') === 'true'
 
-        // Find model and map files
-        for (const file of Main.pak.files) {
-            if (!file.path.endsWith('.igz')) continue
+        try {
+            // Find model and map files
+            for (const file of Main.pak.files) {
+                if (!file.path.endsWith('.igz')) continue
 
-            if (file.path.startsWith('actors/') || file.path.startsWith('models/') && !file.path.includes('Designer_Level_Template')) {
-                if (showGrass || !file.path.includes('Grass'))
-                modelFiles.push(file)
+                if (file.path.startsWith('actors/') || file.path.startsWith('models/') && !file.path.includes('Designer_Level_Template')) {
+                    if (showGrass || !file.path.includes('Grass'))
+                    modelFiles.push(file)
+                }
+                else if (file.path.startsWith('maps/') && file.include_in_pkg)
+                    mapFiles.push(file)
             }
-            else if (file.path.startsWith('maps/') && file.include_in_pkg && !file.path.includes('Audio') && !file.path.includes('Music') && !file.path.includes('StaticCollision'))
-                mapFiles.push(file)
-        }
 
-        this.models = {}
-        
-        // Create model meshes
-        for (let i = 0; i < modelFiles.length; i++) {
-            const file = modelFiles[i]
-            const name = file.path.split('/').pop()
-
-            const title = 'Constructing models'
-            ipcRenderer.send('set-progress-bar', i, modelFiles.length, title, `Reading file ${name}`, 'models loaded')
-
-            const igz = IGZ.fromFileInfos(file)
-            igz.setupChildrenAndReferences()
-            const modelData = extractModelData(igz)
-            if (modelData == null) continue
-            const { drawCalls } = modelData
-
-            const group = new Group()
-            for (let j = 0; j < drawCalls.length; j++) {
-                const drawCall = drawCalls[j]
-                const mesh = this.createMesh(drawCall)
-                group.add(mesh)
-            }
-            this.models[name.replace('.igz', '')] = group
-        }
-
-        // Load level files
-        const processNextFile = (index = 0) => {
-            this.renderer.render(this.scene, this.cam)
-
-            const file = mapFiles[index]
-            const title = 'Loading level files...'
-            ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
-
-            let igz = Main.igz
-
-            if (igz == null || igz.path != file.path) {
-                igz = IGZ.fromFileInfos(file)
-                igz.setupChildrenAndReferences()
-            }
+            this.models = {}
             
-            const { CPlayerStartEntity } = this.process_igz(igz)
+            // Create model meshes
+            for (let i = 0; i < modelFiles.length; i++) {
+                const file = modelFiles[i]
+                const name = file.path.split('/').pop()
 
-            // Set camera start position if PlayerStartAll found
-            const playerStart = CPlayerStartEntity.find(e => e.name.toLowerCase().includes('playerstartall'))?.position
-            if (playerStart != null && !this.initialized)
-                this.cam.position.set(playerStart[0], playerStart[1] + 200, playerStart[2] - 300)
+                const title = 'Constructing models'
+                ipcRenderer.send('set-progress-bar', i, modelFiles.length, title, `Reading file ${name}`, 'models loaded')
 
-            if (index < mapFiles.length - 1) 
-                processNextFile(index + 1)
-            else {
-                ipcRenderer.send('set-progress-bar', null)
-                this.renderer.render(this.scene, this.cam)
-                this.initialized = true
+                const igz = IGZ.fromFileInfos(file)
+                igz.setupChildrenAndReferences()
+                const modelData = extractModelData(igz)
+                if (modelData == null) continue
+                const { drawCalls } = modelData
+
+                const group = new Group()
+                for (let j = 0; j < drawCalls.length; j++) {
+                    const drawCall = drawCalls[j]
+                    const mesh = this.createMesh(drawCall)
+                    if (mesh == null) continue
+                    group.add(mesh)
+                }
+                this.models[name.replace('.igz', '')] = group
             }
-        }
 
-        if (mapFiles.length > 0)
-            processNextFile()
+            // Load level files
+            const processNextFile = (index = 0) => {
+                this.renderer.render(this.scene, this.cam)
+
+                const file = mapFiles[index]
+                const title = 'Loading level files...'
+                ipcRenderer.send('set-progress-bar', index, mapFiles.length, title, `Reading ${file.path.split('/').pop()}`, 'files processed')
+
+                let igz = Main.igz
+
+                if (igz == null || igz.path != file.path) {
+                    igz = IGZ.fromFileInfos(file)
+                    igz.setupChildrenAndReferences()
+                }
+                
+                const { CPlayerStartEntity } = this.process_igz(igz)
+
+                // Set camera start position if PlayerStartAll found
+                const playerStart = CPlayerStartEntity.find(e => e.name.toLowerCase().includes('playerstartall'))?.position
+                if (playerStart != null && reset_camera_location) {
+                    this.cam.position.set(playerStart[0], playerStart[1] + 200, playerStart[2] - 300)
+                    this.cam.rotation.set(0, Math.PI, 0)
+                }
+
+                if (index < mapFiles.length - 1) 
+                    processNextFile(index + 1)
+                else {
+                    ipcRenderer.send('set-progress-bar', null)
+                    this.renderer.render(this.scene, this.cam)
+                    this.initialized = true
+                }
+            }
+
+            if (mapFiles.length > 0)
+                processNextFile()
+        }
+        catch (e) {
+            ipcRenderer.send('set-progress-bar', null)
+            ipcRenderer.send('show-error-message', 'An error occurred while loading models', e.message)
+            console.error(e)
+        }
     }
 
     addObject(object) {
@@ -537,27 +596,60 @@ class LevelExplorer {
     }
 
     createMesh(drawCall) {
+        const path = extractName(drawCall.modelName).toLowerCase()
+        if (path == 'crash_crate_checkpoint' && drawCall.index == 0) return
+
+        const showTextures = (localStorage.getItem('explorer-show-textures') ?? 'false') === 'true'
+        const texture = showTextures || this.mode == 'model' ? extractDrawcallTextureData(Main.pak, drawCall) : null
+
+        const color = texture?.color ? new Color(...texture.color) : 0xffffffff
         const geometry = new BufferGeometry()
-        const material = new MeshPhongMaterial({ color: 0xffffff, shininess: 150, side: DoubleSide, wireframe: false })
+        const material = new MeshPhongMaterial({ color, shininess: 150, side: DoubleSide })
     
+        if (texture?.transparent) {
+            material.transparent = true
+        }
+        else if (texture?.type == 'CWaterMaterial' || texture?.type == 'CFlowWaterMaterial') {
+            material.transparent = true
+            material.opacity = 0.25
+        }
+
         const vertices = drawCall.vertexData.map(e => e.position).flat()
         const normals  = drawCall.vertexData.map(e => e.normal).flat()
-        const indices  = drawCall.indexData
+        const uvs      = drawCall.vertexData.map(e => e.uv).flat()
+        const indices  = drawCall.indexData.slice()
     
         geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3))
         geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3))
+        geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
         geometry.setIndex(indices)
+
+        if (path.includes('water')) {
+            material.color = new Color(0x1278ff)
+            material.transparent = true
+            material.opacity = 0.5
+        }
+        else if (texture?.pixels) {
+            const textureData = new Uint8Array(texture.pixels)
+            const tex = new DataTexture(textureData, texture.width, texture.height, RGBAFormat, UnsignedByteType)
+            tex.needsUpdate = true
+            tex.wrapS = RepeatWrapping
+            tex.wrapT = RepeatWrapping
+            material.map = tex
+        }
     
         const mesh = new Mesh(geometry, material)
-        const prevent_z_fighting = Math.random() * .2 - .1
-        mesh.translateX(prevent_z_fighting)
-        mesh.translateY(prevent_z_fighting)
-        mesh.translateZ(prevent_z_fighting)
+
+        if (path == 'l101_nsanitybeach_terrain01' && drawCall.index == 1) 
+            mesh.translateY(1)
+
         return mesh
     }
 
     loadEntity(entity) {
         if (entity == null) return
+
+        const showTextures = (localStorage.getItem('explorer-show-textures') ?? 'false') === 'true'
 
         let { igz, name, model_name, position, rotation, scale, color, parentPosition, controlPoints, objectHash } = entity
         let model = null
@@ -622,7 +714,8 @@ class LevelExplorer {
         model.traverse((child) => {
             if (child.isMesh) {
                 child.material = child.material.clone()
-                child.material.color.set(color ?? 0xffffff)
+                if (!showTextures)
+                    child.material.color.set(color ?? 0xffffff)
             }
         })
 

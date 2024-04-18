@@ -2027,6 +2027,11 @@ dot-prop@^6.0.1:
   dependencies:
     is-obj "^2.0.0"
 
+dxt-js@^0.0.3:
+  version "0.0.3"
+  resolved "https://registry.yarnpkg.com/dxt-js/-/dxt-js-0.0.3.tgz#7eccdc32a53f17b900a62686d3179e10b39a1ded"
+  integrity sha512-qNBx0i5/ICyNFO7rs5ZothChgfFD408dg/ZBBfWFXDy0xeDQ86t91QUZxj5WqeUzZQ/+PPtjTUC0w3mS+198jg==
+
 each-parallel-async@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/each-parallel-async/-/each-parallel-async-1.0.0.tgz#91783e190000c7dd588336b2d468ebaf71980f7b"

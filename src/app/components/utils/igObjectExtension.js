@@ -1,5 +1,6 @@
 import igObject from "../../../igz/igObject"
 import { computeHash } from "../../../utils"
+import * as dxt from 'dxt-js'
 
 igObject.prototype.tryGetChild = function(type, name) {
     return name == null
@@ -138,4 +139,26 @@ igObject.prototype.extractCollisionData = function(igz) {
     }
 
     return items
+}
+
+igObject.prototype.extractTexture = function(igz) {
+    const format = igz.fixups.EXID.data[0][0]
+    const width = this.view.readUInt16(0x18)
+    const height = this.view.readUInt16(0x1A)
+
+    const compressed = this.extractMemoryData(igz, 0x38, 1, 'UInt8').data
+    let pixels
+
+    if (format.startsWith('dxt')) {
+        const dxt_format = format == 'dxt1_dx11' ? dxt.flags.DXT1 : dxt.flags.DXT5
+        pixels = dxt.decompress(new Uint8Array(compressed), width, height, dxt_format)
+    }
+    else if (format == 'r8g8b8a8_dx11') {
+        pixels = new Uint8Array(compressed)
+    }
+    else {
+        throw new Error(`Unsupported texture format ${format}`)
+    }
+
+    return { pixels, width, height }
 }

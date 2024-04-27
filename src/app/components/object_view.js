@@ -39,8 +39,11 @@ class ObjectView {
         if (this.object.invalid) elm('#object-name').innerHTML += ` <span style="color: #ff0000; font-weight: 200">(${this.object.invalid})</span>`
         
         if (Main.treeMode == 'igz') {
-            const isEntity = ['igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor'].includes(this.object.type)
-            const focusButtonVisible = isEntity && Main.pak != null && !isVectorZero(this.object.view.readVector(3, 0x20))
+            const isEntity = [
+                'igEntity', 'CEntity', 'CPhysicalEntity', 'CGameEntity', 'CActor', 'CWaypoint',
+                'CPlayerStartEntity', 'CScriptTriggerEntity', 'igSplineControlPoint2'
+            ].includes(this.object.type)
+            const focusButtonVisible = isEntity && Main.pak != null && (this.object.size < 44 || !isVectorZero(this.object.view.readVector(3, 0x20)))
             const collisionButtonVisible = this.object.type == 'igEntity' && Main.pak.getCollisionItem(this.object.original_name_hash, Main.igz.path)
             elm('#focus-in-explorer').style.display = focusButtonVisible ? 'block' : 'none'
             elm('#object-rename').style.display = this.object.nameID == -1 ? 'none' : 'block'
@@ -398,6 +401,12 @@ class ObjectView {
                     // TODO: Include missing types fixup lookup
                     if (keys.field.isStringType(keys.field.memType)) {
                         if (!keys.object.fixups.RSTT.includes(keyOffset)) continue
+                    }
+                    else if (keys.field.memType == 'igObjectRefMetaField') {
+                        const inROFS = keys.object.fixups.ROFS.includes(keyOffset)
+                        const inRNEX = keys.object.fixups.RNEX.includes(keyOffset)
+                        const inREXT = keys.object.fixups.REXT.includes(keyOffset)
+                        if (!inROFS && !inRNEX && !inREXT) continue
                     }
                     else if (keys.field.isIntegerType(keys.field.memType) && key >>> 0 == 0xFAFAFAFA) continue
                     else if (key == 0) continue

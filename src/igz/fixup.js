@@ -27,6 +27,10 @@ class Fixup {
         return this.item_count > 0 || this.type == 'TSTR'
     }
 
+    clone() {
+        return new Fixup(this.igz, this.type, this.size, this.header_size, this.item_count, this.rawData.slice())
+    }
+
     // Read fixup content from a BufferView
     static fromBuffer(igz, reader) {
         // Get fixup type
@@ -136,6 +140,7 @@ class Fixup {
         
         this.rawData = this.rawData.slice(0, this.header_size).concat(encoded)
         if (this.rawData.length % 16 != 0) this.rawData.push(...Array(16 - this.rawData.length % 16).fill(0))
+        this.rawData.push(...Array(16).fill(0))
         this.size = this.rawData.length
         this.item_count = data.length
     }
@@ -161,7 +166,7 @@ class Fixup {
             return this.data.map((e, i) => {
                 let text = i + ': '
 
-                if (this.encoded || this.type == 'ONAM' || this.type == 'NSPC') {
+                if (this.encoded || this.type == 'ONAM' || this.type == 'ROOT' || this.type == 'NSPC') {
                     const object = this.getCorrespondingObject(e, objects)
                     if (object.object == null) text += '<ERROR>'
                     else {
@@ -169,12 +174,21 @@ class Fixup {
                         if (object.offset > 0) text += ` [+ 0x${object.offset.toString(16).toUpperCase()}]`
                     }
                 }
+                else if (this.type == 'EXNM') {
+                    const isHandle = this.igz.named_handles.find(handle => handle[0] == e[0] && handle[1] == e[1])
+                    text += `${isHandle ? 'Handle' : 'External'} | ${e[1]}: ${e[0]}`
+                }
+                else if (this.type == 'MTSZ') {
+                    const type = this.igz.fixups.TMET.data[i]
+                    text += `${e} bytes (${type})`
+                }
                 else text += typeof(e) == 'object' ? `${e[1]}: ${e[0]}` : e
 
                 return { 
                     text, 
                     type: 'offset', 
                     fixup: this.type,
+                    index: i,
                     offset: e 
                 }
             })
@@ -200,6 +214,7 @@ class Fixup {
         return {
             ...this,
             igz: undefined,
+            rawData: undefined
         }
     }
 }

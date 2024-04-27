@@ -61,21 +61,26 @@ igObject.prototype.getModel = function(igz) {
         if (model != '') return model
     }
 
-    // const name = this.name.toLowerCase()
-    // if (this.type != 'CGameEntityData' && !name.includes('collectible_wumpa') && !name.includes('collectible_extralife')) 
-    //     console.log(`No model or skin found in ${this.getName()}`)
+    // Special case: collectibles
+    if (this.name.includes('Collectible_Wumpa'))
+        return "crash_wumpafruit_no_sparkles"
+    else if (this.name.includes('Collectible_ExtraLife'))
+        return "Collectible_Crash_ExtraLife"
     
     return null
 }
 
+const convertVector = (v) => [-v[0], v[2], v[1]]
+
 igObject.prototype.toMeshInfo = function(igz, { color = 0xffffff, transform = {}, ...props } = {}) {
-    const convertVector = (v) => [-v[0], v[2], v[1]]
+    const positionOffset = this.type == 'CWaypoint' ? 0x14 : 0x20
+    const position = this.size <= 44 ? [0, 0, 0] : this.view.readVector(3, positionOffset)
     
     const info = {
         igz: igz.path,
         name: this.name,
         objectIndex: this.index,
-        position: this.view.readVector(3, 0x20),
+        position,
         objectHash: this.original_name_hash ?? computeHash(this.name),
         type: this.type,
         color,
@@ -85,7 +90,7 @@ igObject.prototype.toMeshInfo = function(igz, { color = 0xffffff, transform = {}
 
     info.position = convertVector(info.position)
     if (info.scale) info.scale = [info.scale[0], info.scale[2], info.scale[1]]
-    if (info.rotation) info.rotation = info.rotation = convertVector(info.rotation)
+    if (info.rotation) info.rotation = convertVector(info.rotation)
     if (info.parentPosition) info.parentPosition = convertVector(info.parentPosition)
 
     return info
@@ -146,12 +151,24 @@ igObject.prototype.extractTexture = function(igz) {
     const width = this.view.readUInt16(0x18)
     const height = this.view.readUInt16(0x1A)
 
-    const compressed = this.extractMemoryData(igz, 0x38, 1, 'UInt8').data
+    const offset = 0x38
+    const memory_size = this.view.readUInt(offset)
+    if (memory_size == 0) return { data, active: false }
+
+    const bitfield = this.view.readUInt(offset + 4)
+    const active = ((bitfield >> 0x18) & 0x1) != 0x0
+    if (!active) return { data, active: false }
+
+    const dataOffset = this.view.readUInt(offset + 8)
+    const object = igz.findObject(dataOffset)
+    const startOffset = igz.getGlobalOffset(dataOffset) - object.global_offset
+
+    const compressed = object.view.buffer.slice(startOffset, startOffset + memory_size)
     let pixels
 
     if (format.startsWith('dxt')) {
         const dxt_format = format == 'dxt1_dx11' ? dxt.flags.DXT1 : dxt.flags.DXT5
-        pixels = dxt.decompress(new Uint8Array(compressed), width, height, dxt_format)
+        pixels = dxt.decompress(compressed, width, height, dxt_format)
     }
     else if (format == 'r8g8b8a8_dx11') {
         pixels = new Uint8Array(compressed)

@@ -11,6 +11,8 @@ import { extractDrawcallTextureData, extractModelData } from './utils/model_extr
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { extractName } from '../../utils';
 
+const convertVector = (v) => [-v[0], v[2], v[1]]
+
 class LevelExplorer {
     constructor() {
         this.visible = false
@@ -19,6 +21,7 @@ class LevelExplorer {
         this.models = {}
 
         elm('#focus-in-explorer').addEventListener('click', () => this.focusObject(Main.objectView.object))
+        elm('#hide-explorer').addEventListener('click', () => this.toggleVisibility(false))
 
         window.addEventListener('keydown', function(e) {
             // Prevent spacebar from scrolling
@@ -205,8 +208,6 @@ class LevelExplorer {
         this.renderer = new WebGLRenderer({ canvas })
         this.renderer.setClearColor(0x2661ab)
         this.canvas = canvas
-
-        elm('#hide-explorer').addEventListener('click', () => this.toggleVisibility(false))
 
         this.onResize = () => {
             const bounds = canvas.getBoundingClientRect()
@@ -441,7 +442,7 @@ class LevelExplorer {
 
     addObject(object) {
         if (!this.initialized) return
-        if (!['igEntity', 'CGameEntity', 'CActor', 'CEntity', 'CPlayerStartEntity'].includes(object.type)) return
+        if (!['igEntity', 'CGameEntity', 'CActor', 'CEntity', 'CPlayerStartEntity', 'CScriptTriggerEntity', 'CWaypoint'].includes(object.type)) return
         
         const entity = this[`process_${object.type}`](Main.igz, object)
         this.loadEntity(entity)
@@ -463,7 +464,7 @@ class LevelExplorer {
                     if (!showGrass && lowername.includes('grass')) continue
                     if (!show_all_objects && hidden_objects.some(e => lowername.includes(e))) continue
                     if (!show_all_objects && object.references.some(e => hidden_objects.some(h => e.name.toLowerCase().includes(h)))) continue
-                    const result = callback(igz, object)
+                    const result = callback.bind(this, igz, object)()
                     if (result) validObjects.push(result)
                 }
                 catch (e) {
@@ -476,10 +477,13 @@ class LevelExplorer {
         const igEntities         = processObjects('igEntity', this.process_igEntity)
         const CEntities          = processObjects('CEntity', this.process_CEntity)
         const CGameEntities      = processObjects('CGameEntity', this.process_CGameEntity)
-        // const CPhysicalEntities = processObjects('CPhysicalEntity', this.process_CPhysicalEntity)
+        const CPhysicalEntities  = processObjects('CPhysicalEntity', this.process_CPhysicalEntity)
         const CPlayerStartEntity = processObjects('CPlayerStartEntity', this.process_CPlayerStartEntity)
         const CActors            = processObjects('CActor', this.process_CActor)
-        const entities = igEntities.concat(CEntities).concat(CGameEntities).concat(CPlayerStartEntity).concat(CActors)//.concat(CPhysicalEntities)
+        const CScriptTriggerEntities = processObjects('CScriptTriggerEntity', this.process_CScriptTriggerEntity)
+        const CWaypoints         = processObjects('CWaypoint', this.process_CWaypoint)
+        const entities           = igEntities.concat(CEntities).concat(CGameEntities).concat(CPlayerStartEntity).concat(CActors)
+                                             .concat(CScriptTriggerEntities).concat(CPhysicalEntities).concat(CWaypoints)
 
         // Load entities
         for (const entity of entities) {
@@ -495,14 +499,70 @@ class LevelExplorer {
         const igComponentDataTable = igEntityData.getChild('igComponentDataTable')
         const CModelComponentData  = igComponentDataTable.tryGetChild('CModelComponentData')
         
-        if (!CModelComponentData) return object.toMeshInfo(igz)
+        let model_name, color
 
-        const model_name = CModelComponentData.getModel(igz)
+        if (CModelComponentData) {
+            model_name = CModelComponentData.getModel(igz)
+        }
+        else {
+            const CPhysicalEntity = igComponentDataTable.tryGetChildRecursive('igPrefabComponentData', 'igEntityList', 'CPhysicalEntity')
+            const CPhysicalEntityData = CPhysicalEntity?.getChild('CPhysicalEntityData')
+
+            if (CPhysicalEntityData) {
+                model_name = CPhysicalEntityData.getModel(igz)
+                color = 0xee222e
+            }
+        }
+
+        if (model_name == null) return object.toMeshInfo(igz)
 
         const igEntityTransform = object.tryGetChild('igEntityTransform')
         const transform = igEntityTransform?.getTransform()
 
-        return object.toMeshInfo(igz, { model_name, transform })
+        return object.toMeshInfo(igz, { model_name, transform, color })
+    }
+
+    process_igSpline2(igz, object)
+    {
+        const igSplineControlPoint2List = object.tryGetChild('igSplineControlPoint2List')
+        const controlPoints = igSplineControlPoint2List?.children.map(e => e.object.toMeshInfo(igz, {position: e.object.view.readVector(3, 0x10)}))
+
+        const distanceBetween = (v1, v2) => Math.sqrt(v1.map((e, i) => (e - v2[i]) ** 2).reduce((a, b) => a + b, 0))
+        
+        let distance = 0
+        let lastPosition = controlPoints[0].position
+        let controlPointDistances = []
+
+        for (let i = 1; i < controlPoints.length; i++) {
+            const position = controlPoints[i].position
+            const dist = distanceBetween(position, lastPosition)
+            distance += dist
+            controlPointDistances.push({position, distance})
+            lastPosition = position
+        }
+
+        const closestPoint = (distance) => {
+            let closest = 0
+            for (let i = 1; i < controlPointDistances.length; i++) {
+                if (controlPointDistances[i].distance > distance) break
+                closest = i
+            }
+            let p1 = controlPointDistances[closest]
+            let p2 = controlPointDistances[closest + 1]
+            let interp = (distance - p1.distance) / (p2.distance - p1.distance)
+            return p1.position.map((e, i) => e + (p2.position[i] - e) * interp)
+        }
+        
+        const igSplineEventList = object.tryGetChildRecursive('igSplineEventTrack', 'igSplineEventList')
+        const splineMarkers = igSplineEventList?.children.map((e, i) => {
+            const distance = e.object.view.readFloat(0x10)
+            const position = closestPoint(distance)
+            const infos = e.object.toMeshInfo(igz, { color: 0x5fbfaf})
+            infos.position = position
+            return infos
+        })
+
+        return { controlPoints, splineMarkers }
     }
 
     process_CEntity(igz, object) 
@@ -512,39 +572,48 @@ class LevelExplorer {
         const CEntityData          = object.getChild('CEntityData')
         const igComponentDataTable = CEntityData.getChild('igComponentDataTable')
         const CVscComponentData    = igComponentDataTable.tryGetChild('CVscComponentData', 'CommonSpawnerTemplate')
-        const color = 0x77ff6b
+        let color = 0x77ff6b
 
-        if (!CVscComponentData) return object.toMeshInfo(igz, {color}) 
+        const igEntityTransform = object.tryGetChild('igEntityTransform')
+        const originalTransform = igEntityTransform?.getTransform()
+
+        const show_splines = (localStorage.getItem('explorer-show-splines') ?? 'true') === 'true'
+        let controlPoints = null
+        let splineMarkers = null
+        let parentPosition = null
+        if (show_splines) {
+            const igSpline2 = CEntityData.tryGetChildRecursive('igComponentDataTable', 'CSplineComponentData', 'igSpline2')
+            if (igSpline2) {
+                const splineData = this.process_igSpline2(igz, igSpline2)
+                controlPoints = splineData.controlPoints
+                splineMarkers = splineData.splineMarkers
+                parentPosition = object.view.readVector(3, 0x20)
+            }
+        }
+
+        if (!CVscComponentData) return object.toMeshInfo(igz, {color, controlPoints, splineMarkers, parentPosition, originalTransform}) 
 
         const EntityToSpawn = CVscComponentData.view.readUInt(0x48)
 
         if ((EntityToSpawn & 0x80000000) == 0) {
             console.warn('[CEntity] NOT A HANDLE', object.name, EntityToSpawn)
-            return object.toMeshInfo(igz, {color})
+            return object.toMeshInfo(igz, {color, controlPoints, splineMarkers, parentPosition, originalTransform})
         }
 
         const spawnerName = igz.named_handles[EntityToSpawn & 0x7FFFFFFF][0]
         const Entity = igz.objects.find(e => e.name == spawnerName)
 
         if (!Entity) return console.warn('[CEntity] No object found for', object.name)
-        if (!['CPhysicalEntity', 'CGameEntity', 'CActor'].includes(Entity.type)) return object.toMeshInfo(igz, {color})
+        if (!['CPhysicalEntity', 'CGameEntity', 'CActor'].includes(Entity.type)) return object.toMeshInfo(igz, {color, controlPoints, splineMarkers, parentPosition, originalTransform})
 
         const EntityData = Entity.getChild(Entity.type + 'Data')
         const model_name = EntityData.getModel(igz)
 
-        const igEntityTransform = object.tryGetChild('igEntityTransform')
         const igParentTransform = Entity.tryGetChild('igEntityTransform')
         const transform = igParentTransform?.getTransform() ?? igEntityTransform?.getTransform() ?? {}
-        const parentPosition = Entity.view.readVector(3, 0x20)
+        parentPosition = Entity.view.readVector(3, 0x20)
 
-        const show_splines = (localStorage.getItem('explorer-show-splines') ?? 'true') === 'true'
-        let controlPoints = null
-        if (show_splines) {
-            const igSplineControlPoint2List = CEntityData.tryGetChildRecursive('igComponentDataTable', 'CSplineComponentData', 'igSpline2', 'igSplineControlPoint2List')
-            controlPoints = igSplineControlPoint2List?.children.map(e => e.object.toMeshInfo(igz, {position: e.object.view.readVector(3, 0x10)}))
-        }
-
-        return object.toMeshInfo(igz, { model_name, transform, color, parentPosition, controlPoints})
+        return object.toMeshInfo(igz, { model_name, transform, color, parentPosition, controlPoints, splineMarkers, originalTransform})
     }
 
     process_CGameEntity(igz, object) 
@@ -555,15 +624,22 @@ class LevelExplorer {
 
         const show_splines = (localStorage.getItem('explorer-show-splines') ?? 'true') === 'true'
         let controlPoints = null
+        let splineMarkers = null
+        let parentPosition = [0,0,0]
         if (show_splines) {
-            const igSplineControlPoint2List = CGameEntityData.tryGetChildRecursive('igComponentDataTable', 'CSplineComponentData', 'igSpline2', 'igSplineControlPoint2List')
-            controlPoints = igSplineControlPoint2List?.children.map(e => e.object.toMeshInfo(igz, {position: e.object.view.readVector(3, 0x10)}))
+            const igSpline2 = CGameEntityData.tryGetChildRecursive('igComponentDataTable', 'CSplineComponentData', 'igSpline2')
+            if (igSpline2) {
+                const splineData = this.process_igSpline2(igz, igSpline2)
+                controlPoints = splineData.controlPoints
+                splineMarkers = splineData.splineMarkers
+                parentPosition = object.view.readVector(3, 0x20)
+            }
         }
 
         const igEntityTransform = object.tryGetChild('igEntityTransform')
         const transform = igEntityTransform?.getTransform()
 
-        return object.toMeshInfo(igz, { model_name, transform, color, controlPoints })
+        return object.toMeshInfo(igz, { model_name, transform, color, controlPoints, splineMarkers, parentPosition })
     }
 
     process_CPhysicalEntity(igz, object) 
@@ -576,6 +652,23 @@ class LevelExplorer {
         const transform = igEntityTransform?.getTransform()
 
         return object.toMeshInfo(igz, { model_name, transform, color })
+    }
+
+    process_CScriptTriggerEntity(igz, object)
+    {
+        const EntityData = object.getChild('CScriptTriggerEntityData')
+        const model_name = EntityData.getModel(igz)
+        const color = 0xffa500
+
+        const igEntityTransform = object.tryGetChild('igEntityTransform')
+        const transform = igEntityTransform?.getTransform()
+
+        return object.toMeshInfo(igz, { model_name, transform, color })
+    }
+
+    process_CWaypoint(igz, object) 
+    {
+        return object.toMeshInfo(igz, {color: 0x5faaff})
     }
 
     process_CActor(igz, object)
@@ -651,13 +744,8 @@ class LevelExplorer {
 
         const showTextures = (localStorage.getItem('explorer-show-textures') ?? 'false') === 'true'
 
-        let { igz, name, model_name, position, rotation, scale, color, parentPosition, controlPoints, objectHash } = entity
+        let { igz, name, model_name, position, rotation, scale, color, parentPosition, controlPoints, splineMarkers, originalTransform, objectHash } = entity
         let model = null
-
-        if (name.includes('Collectible_Wumpa'))
-            model_name = "crash_wumpafruit_no_sparkles"
-        else if (name.includes('Collectible_ExtraLife'))
-            model_name = "Collectible_Crash_ExtraLife"
 
         if (model_name != null) {
             model_name = model_name.split('\\').pop().split('/').pop().replace('.igb', '')
@@ -667,13 +755,6 @@ class LevelExplorer {
             else model = model.clone()
         }
         
-        if (model == null) {
-            const geo = new SphereGeometry(20, 20, 20)
-            const mat = new MeshBasicMaterial()
-            model = new Mesh(geo, mat)
-        }
-        model.userData = { ...entity }
-
         // Apply custom color
         const lower = name.toLowerCase()
 
@@ -696,7 +777,17 @@ class LevelExplorer {
 
         // Create splines (camera...)
         if (controlPoints) {
-            this.createLine(controlPoints, position, 0xff0000, 0.001, true)
+            const rotation = originalTransform ? convertVector(originalTransform.rotation) : [0,0,0]
+            this.createLine(controlPoints, position, rotation, model == null ? 0xff0000 : color, 0.001, true)
+        }
+        if (splineMarkers) {
+            splineMarkers.forEach(point => {
+                const dot = new SphereGeometry(20, 20, 20)
+                const sphere = new Mesh(dot, new MeshBasicMaterial({ color: 0xff00ff }))
+                sphere.position.set(...point.position.map((v, i) => v + parentPosition[i]))
+                sphere.userData = { ...point }
+                this.scene.add(sphere)
+            })
         }
 
         if (position[0] == 0 && position[1] == 0 && position[2] == 0) {
@@ -707,8 +798,15 @@ class LevelExplorer {
         // Link CEntity to spawners
         const show_entity_links = (localStorage.getItem('explorer-show-entity-links') ?? 'false') === 'true'
         if (show_entity_links && parentPosition && !(parentPosition[0] == 0 && parentPosition[1] == 0 && parentPosition[2] == 0)) {
-            this.createLine([{position}, {position: parentPosition}], color, 0.005, false)
+            this.createLine([{position}, {position: parentPosition}], [0,0,0], [0,0,0], color, 0.005, false)
         }
+        
+        if (model == null) {
+            const geo = new SphereGeometry(20, 20, 20)
+            const mat = new MeshBasicMaterial()
+            model = new Mesh(geo, mat)
+        }
+        model.userData = { ...entity }
 
         // Apply material
         model.traverse((child) => {
@@ -738,8 +836,13 @@ class LevelExplorer {
         this.scene.add(model)
     }
 
-    createLine(points, parentPosition, color, width, addMarkers = true) {
+    createLine(points, parentPosition, parentRotation, color, width, addMarkers = true) {
         const geo = new LineGeometry()
+        const vector = new Vector3()
+        const euler = new Euler(...parentRotation, 'YZX')
+        const applyRotation = (v) => vector.fromArray(v).applyEuler(euler).toArray()
+
+        points.forEach(e => e.position = applyRotation(e.position))
         points.forEach(e => e.position = e.position.map((v, i) => v + parentPosition[i]))
         geo.setPositions(points.map(e => e.position).flat())
         const mat = new LineMaterial({
@@ -754,7 +857,7 @@ class LevelExplorer {
         if (addMarkers) {
             for (const point of points) {
                 const dot = new SphereGeometry(10, 10, 10)
-                const sphere = new Mesh(dot, new MeshBasicMaterial({ color: 0xff0000 }))
+                const sphere = new Mesh(dot, new MeshBasicMaterial({ color }))
                 sphere.position.set(...point.position)
                 sphere.userData = { ...point, splineParentPosition: parentPosition }
                 this.scene.add(sphere)

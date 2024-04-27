@@ -107,19 +107,7 @@ class IGZ {
         }
     
         if (this.fixups.EXNM) {
-            // Init EXNM fixup data
-            this.fixups.EXNM.data.forEach(([a, b], i) => {
-                const object    = this.fixups.TSTR.data[a]
-                const namespace = this.fixups.TSTR.data[b & 0x7FFFFFFF]
-                const isHandle = (b & 0x80000000) != 0
-
-                if (isHandle) 
-                    this.named_handles.push([object, namespace])
-                else 
-                    this.named_externals.push([object, namespace])
-
-                this.fixups.EXNM.data[i] = [ object, (isHandle ? 'Handle | ' : 'External | ') + namespace ]
-            })
+            this.setupEXNM()
         }
 
         /// Objects (Chunk 1) ///
@@ -371,7 +359,7 @@ class IGZ {
      */
     deleteObject(object, recursive = false) {
         const index = this.objects.indexOf(object)
-        if (index == -1) return console.warn('Object not found, skip delete:', object.name, this.path)
+        if (index == -1) return console.warn('Object not found, skip delete:', object.getName(), this.path)
 
         object.deleted = true
 
@@ -395,7 +383,7 @@ class IGZ {
     updateObjects(newObjects = []) {
         let namedObjects = this.objectList.getList().map((e) => this.findObject(e))
                                .concat(newObjects.filter(e => e.nameID != -1))
-                               .filter(e => e != null)
+                               .filter(e => e != null) // Remove deleted objects
         
         // Update igObjectList + igNameList fixups
         this.objectList.clearFixups()
@@ -740,6 +728,27 @@ class IGZ {
     }
 
     /**
+     * Init the EXNM fixup
+     */
+    setupEXNM() {
+        this.named_handles = []
+        this.named_externals = []
+
+        this.fixups.EXNM.data.forEach(([a, b], i) => {
+            const object    = this.fixups.TSTR.data[a]
+            const namespace = this.fixups.TSTR.data[b & 0x7FFFFFFF]
+            const isHandle = (b & 0x80000000) != 0
+
+            if (isHandle) 
+                this.named_handles.push([object, namespace])
+            else 
+                this.named_externals.push([object, namespace])
+
+            this.fixups.EXNM.data[i] = [object, namespace]
+        })
+    }
+
+    /**
      * Finds the references to the external objects defined in the EXID fixup
      * 
      * @param {string} archives_folder - The path to the archives/ folder of the game
@@ -823,17 +832,197 @@ class IGZ {
         for (const object of this.objects) {
             const addFixup = (name) => {
                 if (this.fixups[name] == null) return
+
                 let index = last_offsets[name]
+                if (index >= this.fixups[name].data.length) return
                 let nextOffset = this.fixups[name].data[index]
-                while (nextOffset < object.offset + object.size) {
+                nextOffset = this.getGlobalOffset(nextOffset)
+
+                while (nextOffset < object.global_offset + object.size) {
                     index++
                     last_offsets[name]++
-                    object.fixups[name].push(nextOffset - object.offset)
+                    object.fixups[name].push(nextOffset - object.global_offset)
+                    
                     nextOffset = this.fixups[name].data[index]
+                    nextOffset = this.getGlobalOffset(nextOffset)
+                    if (index > this.fixups[name].data.length - 1) break
                 }
             }
             ['RSTT', 'RHND', 'ROFS', 'RNEX', 'REXT', 'RPID'].forEach(addFixup)
         }
+    }
+    
+    /**
+     * Find all igMemory and igVector objects fields in the igz file
+     * 
+     * @returns {Array<Object>} List of memory objects
+     */
+    findMemories() {
+        return this.objects.flatMap(object => {
+            const fields = object.getFieldsMetadata(this)
+            return fields.map(({type, offset, name}) => {
+                if (type != 'igMemoryRefMetaField' && type != 'igVectorMetaField') return
+
+                const memory_size = object.view.readUInt(offset)
+                if (memory_size == 0) return
+
+                const bitfield = object.view.readUInt(offset + 4)
+                const active = ((bitfield >> 0x18) & 0x1) != 0x0
+                if (!active) return
+
+                const data_offset = object.view.readUInt(offset + 8)
+
+                return { object, name, data_offset, memory_size }
+            })
+        })
+        .filter(e => e != null)
+    }
+
+    /**
+     * Find all references to a given fixup index
+     * 
+     * @param {string} fixupName - The fixup name (EXID, TSTR, EXNM)
+     * @param {number} index - The fixup index
+     */
+    findFixupReferences(fixupName, index) {
+        if (!['TSTR', 'EXID', 'EXNM'].includes(fixupName)) {
+            console.warn('Cannot find references for fixup of type ', fixupName)
+            return []
+        }
+
+        const objects = []
+        const memories = this.findMemories()
+
+        const addObject = (object, offset, fields, fixup) => {
+            const size = object.dynamicObject 
+                ? fields[fields.length - 1].offset + fields[fields.length - 1].size
+                : this.fixups.MTSZ.data[this.fixups.TMET.data.indexOf(object.type)]
+
+            let field = fields.find(f => f.offset == offset)?.name ?? `0x${offset.toString(16).toUpperCase()}`
+
+            if (offset >= size) {
+                const local_offset = object.offset + offset
+                const memory = memories.find(m => local_offset >= m.data_offset && local_offset < m.data_offset + m.memory_size)
+                if (memory == null) {
+                    console.warn('Memory not found:', object.getName(), offset)
+                    field = '<error>'
+                }
+                else {
+                    field = `${memory.name}+0x${(local_offset - memory.data_offset).toString(16).toUpperCase()}`
+                    object = memory.object
+                }
+            }
+
+            if (fixup != null) field += ` (${fixup})`
+
+            objects.push({ object, field })
+        }
+
+        if (fixupName == 'TSTR') {
+            // Find references in objects
+            this.objects.forEach(object => {
+                const fixups = object.fixups.RSTT
+                if (fixups.length == 0) return
+
+                const fields = object.getFieldsMetadata(this)
+
+                fixups.forEach(e => {
+                    const valueAtOffset = object.view.readUInt(e)
+                    if (valueAtOffset != index) return
+                    addObject(object, e, fields)
+                })
+            })
+
+            // Find references in EXNM
+            if (this.fixups.EXNM) {
+                const exnm = this.fixups.EXNM.extractData()
+                exnm.forEach(([objectID, nameID], i) => {
+                    nameID &= 0x7FFFFFFF
+                    if (objectID == index || nameID == index) {
+                        const object = this.fixups.TSTR.data[objectID]
+                        const name = this.fixups.TSTR.data[nameID]
+                        objects.push({ field: `EXNM #${i}: ${name} :: ${object}`, index: i, object: null })
+                    }
+                })
+            }
+        }
+        else if (fixupName == 'EXNM') {
+            const exnm = this.fixups.EXNM.extractData()
+            let isHandle
+            let named_handles = -1
+            let named_externals = -1
+
+            for (let i = 0; i <= index; i++) {
+                isHandle = exnm[i][1] & 0x80000000
+                if (isHandle) named_handles++
+                else named_externals++
+            }
+            index = isHandle ? named_handles : named_externals
+
+            const R_fixup = isHandle ? 'RHND' : 'RNEX'
+            
+            this.objects.forEach(object => {
+                const fixups = object.fixups[R_fixup]
+                if (fixups.length == 0) return
+
+                const fields = object.getFieldsMetadata(this)
+
+                fixups.forEach(e => {
+                    const valueAtOffset = object.view.readUInt(e)
+                    if (isHandle && (valueAtOffset & 0x80000000) == 0) return
+                    if ((valueAtOffset & 0x3FFFFFFF) != index) return
+                    addObject(object, e, fields, R_fixup)
+                })
+            })
+        }
+        else if (fixupName == 'EXID') {
+            this.objects.forEach(object => {
+                const fixupsRHND = object.fixups.RHND
+                const fixupsREXT = object.fixups.REXT
+                if (fixupsRHND.length == 0 && fixupsREXT.length == 0) return
+
+                const fields = object.getFieldsMetadata(this)
+
+                fixupsRHND.forEach(e => {
+                    const valueAtOffset = object.view.readUInt(e)
+                    if ((valueAtOffset & 0x80000000) != 0) return
+                    if ((valueAtOffset & 0x3FFFFFFF) != index) return
+                    addObject(object, e, fields, 'RHND')
+                })
+                fixupsREXT.forEach(e => {
+                    const valueAtOffset = object.view.readUInt(e)
+                    if (valueAtOffset != index) return
+                    addObject(object, e, fields, 'REXT')
+                })
+            })
+        }
+
+        return objects
+    }
+
+    /**
+     * Add a new entry to the TDEP fixup
+     */
+    addTDEP(name, path) {
+        this.fixups.TDEP.data.push([name, path])
+        this.updated = true
+        return this.fixups.TDEP.data.length - 1
+    }
+
+    /**
+     * Update a TDEP entry
+     */
+    updateTDEP(index, name, path) {
+        Main.igz.fixups.TDEP.data[index] = [name, path]
+    }
+
+    /**
+     * Remove a TDEP entry
+     */
+    removeTDEP(index) {
+        this.fixups.TDEP.data.splice(index, 1)
+        this.updated = true
+        return
     }
 
     /**
@@ -854,6 +1043,40 @@ class IGZ {
 
         this.updated = true
         return this.fixups.TSTR.data.length - 1
+    }
+
+    /**
+     * Update a TSTR entry and the corresponding objects names indexes
+     */
+    updateTSTR(index, name) {
+        this.fixups.TSTR.data[index] = name
+        this.objects.forEach(obj => {
+            if (obj.nameID == index) obj.name = name
+        })
+    }
+
+    /**
+     * Remove a TSTR entry and update objects names indexes and the EXNM fixup
+     */
+    removeTSTR(index) {
+        this.fixups.TSTR.data.splice(index, 1)
+        this.updated = true
+        
+        const exnm = this.fixups.EXNM.extractData()
+        exnm.forEach((e, i) => {
+            const isHandle = e[1] & 0x80000000
+            if (e[0] >= index) e[0]--
+            if (e[1] >= index) e[1]--
+            if (isHandle) e[1] |= 0x80000000
+        })
+        this.fixups.EXNM.updateData(exnm)
+
+        this.objects.forEach(obj => {
+            obj.fixups.RSTT.forEach(e => {
+                const val = obj.view.readUInt(e)
+                if (val >= index) obj.view.setUInt(val - 1, e)
+            })
+        })
     }
 
     /**
@@ -928,6 +1151,30 @@ class IGZ {
     }
 
     /**
+     * Update an EXID entry
+     */
+    updateEXID(index, name, path) {
+        if (this.fixups.EXID == null) return console.warn('No EXID fixup found')
+
+        const exidData = this.fixups.EXID.extractData()
+        exidData[index] = [name, path]
+        this.fixups.EXID.updateData(exidData)
+        this.fixups.EXID.data[index] = [name, path]
+        this.updated = true
+    }
+
+    /**
+     * Remove an EXID entry
+     */
+    removeEXID(index) {
+        if (this.fixups.EXID == null) return console.warn('No EXID fixup found')
+
+        this.fixups.EXID.data.splice(index, 1)
+        this.fixups.EXID.updateData(this.fixups.EXID.data)
+        this.updated = true
+    }
+
+    /**
      * Adds a handle to the EXNM fixup and named_handles list if it does not exist
      * 
      * @param {string} name - Object name
@@ -941,18 +1188,55 @@ class IGZ {
         const objectID = this.addTSTR(name)
 
         if (isHandle) fileID |= 0x80000000
+        fileID >>>= 0
 
         const exnmData = this.fixups.EXNM.extractData()
 
         for (const [i, [n, f]] of exnmData.entries()) {
-            if (n == objectID && f == fileID) return
+            if (n == objectID && f == fileID) {
+                console.warn('EXNM entry already exists:', name, path)
+                break
+            }
         }
 
-        this.fixups.EXNM.updateData(exnmData.concat([[objectID, fileID >>> 0]]))
-        this.fixups.EXNM.data.push([name, '(New) | ' + file])
+        this.fixups.EXNM.updateData(exnmData.concat([[objectID, fileID]]))
+        this.fixups.EXNM.data.push([name, file])
         this.updated = true
 
         console.log(`Add EXNM (${isHandle ? 'named_handles' : 'named_externals'}): ${name} ${file}`)
+
+        return this.fixups.EXNM.data.length - 1
+    }
+
+    /**
+     * Update an EXNM entry. Add TSTR entries if they do not exist
+     */
+    updateEXNM(index, name, path) {
+        if (this.fixups.EXNM == null) return console.warn('No EXNM fixup found')
+
+        let fileID = this.addTSTR(path)
+        const objectID = this.addTSTR(name)
+
+        const exnmData = this.fixups.EXNM.extractData()
+
+        const isHandle = exnmData[index][1] & 0x80000000
+        if (isHandle) fileID |= 0x80000000
+
+        exnmData[index] = [objectID, fileID >>> 0]
+        this.fixups.EXNM.updateData(exnmData)
+        this.fixups.EXNM.data[index] = [name, path]
+        this.updated = true
+    }
+
+    /**
+     * Remove an EXNM entry
+     */
+    removeEXNM(index) {
+        if (this.fixups.EXNM == null) return console.warn('No EXNM fixup found')
+
+        this.fixups.EXNM.data.splice(index, 1)
+        this.fixups.EXNM.updateData(this.fixups.EXNM.extractData())
+        this.updated = true
     }
 
     /**
@@ -1123,7 +1407,7 @@ class IGZ {
         if (mode == 'root' || mode == 'alchemist') root = this.getRootObjects()
         else if (mode == 'named') root = this.objects.filter(e => e.nameID != -1)
 
-        const custom_objects = this.objects.filter(e => e.custom && !e.references.some(r => r.custom))
+        const custom_objects = this.objects.filter(e => e.custom && (!e.references.some(r => r.custom) || root.includes(e)))
         const unreferenced = this.objects.filter(e => e.references.length == 0)
         const vscRoot = this.objects.find(e => e.type == 'igVscMetaObject')
 

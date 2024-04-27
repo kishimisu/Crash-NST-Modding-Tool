@@ -138,7 +138,7 @@ class Main {
         elm('#pak-import').style.display = 'none'
         elm('#back-pak').style.display = pak == null ? 'none' : 'block'
         elm('#auto-refresh').checked = root.objects.length < 500
-        elm('#use-current-pak').parentNode.style.display = 'none'
+        elm('#use-current-pak').parentNode.style.display = pak ? 'flex' : 'none'
         elm('#display-mode').style.display = 'block'
     }
 
@@ -161,20 +161,31 @@ class Main {
         })
     }
 
-    static reloadTreeIGZ() {
+    static reloadTreeIGZ(updateExpandedState = true) {
         if (this.treeMode == 'pak') return
         const root = this.treeMode === 'igz' ? this.igz : this.hkx
-        this.saveTreeExpandedState(this.treeMode)
+        if (updateExpandedState) this.saveTreeExpandedState(this.treeMode)
         tree.load([])
         tree.load(root.toNodeTree(true, localStorage.getItem('display-mode') ?? 'root'))
         this.colorizeMainTree()
         this.updateTitle()
-        this.restoreTreeExpandedState(this.treeMode)
+        if (updateExpandedState) this.restoreTreeExpandedState(this.treeMode)
     }
 
     // Apply colors to tree nodes depending on their updated status
     static colorizeMainTree(tree_ = tree) {
         const defaultColor = '#fefefe'
+
+        const getFixupColor = (type) => ({
+            'TDEP': '#9cffd2',
+            'TSTR': '#ffffff',
+            'TMET': '#fdcb9a',
+            'MTSZ': '#fdcb9a',
+            'EXID': '#f2f989',
+            'EXNM': '#e7b3fd',
+            'ROOT': '#9a8cff',
+            'ONAM': '#9a8cff',
+        }[type]  ?? '#6fadff')
 
         tree_.available().forEach(e => {
             // PAK file node
@@ -199,6 +210,63 @@ class Main {
                 const type = end == -1 ? e.text : e.text.slice(0, end)
                 e.itree.ref.querySelector('.title').style.color = randomColor(type)
             }
+            else if (e.type == 'fixup') {
+                const title = e.itree.ref.querySelector('.title')
+
+                if (title.children.length == 0) {
+                    const name = e.text.slice(0, 4)
+                    const count = e.text.slice(4)
+                    const color = getFixupColor(name)
+
+                    title.innerHTML = `<div class="object-node-name">
+                        <span style="color:${color}">${name}</span>${count}
+                    </div>`
+                }
+            }
+            // Fixup child node
+            else if (e.type == 'offset') {
+                if (['TSTR', 'TMET', 'MTSZ'].includes(e.fixup)) return
+
+                const title = e.itree.ref.querySelector('.title')
+                let color = getFixupColor(e.fixup)
+                let text = e.text
+
+                if (title.children.length == 0) {
+                    const firstIndex = text.indexOf(':') + 1
+                    const lastIndex = text.lastIndexOf(':')
+                    const id = text.slice(0, firstIndex + 1)
+                    let type = text.slice(firstIndex + 1, lastIndex + 1)
+                    let name = text.slice(lastIndex + 1)
+
+                    if (e.fixup.startsWith('R') || e.fixup == 'ONAM') {
+                        text = text.slice(firstIndex + 1)
+                        let lastIndex = text.indexOf(':')
+                        if (lastIndex == -1) lastIndex = text.indexOf('[')
+                        if (lastIndex == -1) lastIndex = text.length    
+                        type = text.slice(0, lastIndex)
+                        name = text.slice(lastIndex)
+
+                        const spaceIndex = type.indexOf(' ')
+                        color = randomColor(spaceIndex == -1 ? type : type.slice(0, spaceIndex))
+                    }
+
+                    title.innerHTML = ''
+                    
+                    const objectNameDiv = createElm('div', 'object-node-name')
+                    const objectTypeSpan = createElm('span', '', { color })
+                    objectTypeSpan.innerText = type
+                    
+                    objectNameDiv.appendChild(document.createTextNode(id))
+                    objectNameDiv.appendChild(objectTypeSpan)
+                    
+                    if (name != '') {
+                        const objectNameSpan = createElm('span', '', { color: '' })
+                        objectNameSpan.innerText = name
+                        objectNameDiv.appendChild(objectNameSpan)
+                    }
+                    title.appendChild(objectNameDiv)
+                }
+            }
             // IGZ object node
             else if (e.type === 'object') {
                 const root = this.igz ?? this.hkx
@@ -222,11 +290,18 @@ class Main {
                         name = objectName.slice(sep+1)
                     }
 
-                    const template = `<div class="object-node-name">
-                        <span style="color:${typeColor}">${type}</span>
-                        ${name != '' ? '<span>' + name + '</span>' : ''}
-                    </div>`
-                    title.innerHTML = template
+                    title.innerHTML = ''
+                    const objectNameDiv = createElm('div', 'object-node-name')
+                    const objectTypeSpan = createElm('span', '', { color: typeColor })
+                    objectTypeSpan.innerText = type
+                    objectNameDiv.appendChild(objectTypeSpan)
+
+                    if (name != '') {
+                        const objectNameSpan = createElm('span', '', { color: object.custom ? '#b1ffd0' : '' })
+                        objectNameSpan.innerText = name
+                        objectNameDiv.appendChild(objectNameSpan)
+                    }
+                    title.appendChild(objectNameDiv)
                 }
 
                 const children = e.itree.ref.querySelector('.object-node-name').children
@@ -393,6 +468,7 @@ class Main {
 
     // Show or hide the object data view (data table + field table)
     static showObjectDataView(visible = false) {
+        elm('#fixup-infos').style.display = 'none'
         elm('#data-table-ctn').innerHTML = ''
         elm('#data-view').style.display = visible ? 'flex' : 'none'
         elm('#object-view-ctn').style.display = visible ? 'block' : 'none'
@@ -403,7 +479,7 @@ class Main {
     // Update window title depending on current file and changes
     static updateTitle() {
         const pak_path = pak?.path + (pak?.updated ? '*' : '')
-        const title = 'The Apprentice v1.2 - '
+        const title = 'The Apprentice v1.26 - '
 
         if (this.treeMode === 'pak') {
             document.title = title + pak_path
@@ -540,16 +616,19 @@ function onNodeClick(event, node)
         }
         // Fixup child node
         else if (node.type === 'offset') {
-            const fixup = igz.fixups[node.fixup]
-            if (fixup && fixup.isEncoded()) {
+            Main.hideStructView()
+            Main.showObjectDataView(false)
+
+            elm('#fixup-infos').style.display = 'flex'
+
+            if (node.fixup.startsWith('R') || node.fixup == 'ONAM') {
+                const fixup = igz.fixups[node.fixup]
                 const child = fixup.getCorrespondingObject(node.offset, igz.objects)?.object
-                Main.hideStructView()
                 Main.objectView = new ObjectView(child)
+                return
             }
-            else {
-                Main.hideStructView()
-                Main.showObjectDataView(false)
-            }
+            
+            onNamedFixupClick(node)
         }
         // Object node
         else if (node.type === 'object') {
@@ -569,6 +648,150 @@ function onNodeClick(event, node)
             Main.objectView = new ObjectView(object)
         }
     }
+}
+
+function onNamedFixupClick(node) {
+    const showReferences = ['TSTR', 'EXID', 'EXNM'].includes(node.fixup)
+    const showInput      = !['TMET', 'MTSZ'].includes(node.fixup)
+    const showTwoInputs  = ['TDEP', 'EXID', 'EXNM'].includes(node.fixup)
+    const references = showReferences ? Main.igz.findFixupReferences(node.fixup, node.index) : []
+
+    const createReferenceList = () => {
+        elm('#fixup-title').innerText = node.text
+
+        if (!showInput)
+            return elm('#fixup-sections').style.display = 'none'
+        
+        elm('#fixup-sections').style.display = 'block'
+        
+        if (node.fixup == 'EXNM') {
+            elm('#fixup-checkbox-container').style.display = 'flex'
+            elm('#fixup-isHandle').checked = node.text.includes('Handle |')
+        }
+        else
+            elm('#fixup-checkbox-container').style.display = 'none'
+
+        const fileInput = elm('#fixup-file')
+        fileInput.placeholder = 'File name'
+        fileInput.value = Main.igz.fixups[node.fixup].data[node.index]
+        
+        const objectInput = elm('#fixup-object')
+
+        if (showTwoInputs) {
+            objectInput.style.display = 'block'
+            objectInput.placeholder = 'Object name'
+            const data = Main.igz.fixups[node.fixup].data[node.index]
+            fileInput.value = data[1]
+            objectInput.value = data[0]
+            fileInput.style.minWidth = '35%'
+            objectInput.style.minWidth = '35%'
+        }
+        else {
+            fileInput.style.minWidth = '70%'
+            objectInput.style.display = 'none'
+        }
+
+        const updateFixups = (index, updateEXNM = false) => {
+            if (updateEXNM && Main.igz.fixups.EXNM) {
+                Main.igz.fixups.EXNM.data = Main.igz.fixups.EXNM.extractData()
+                Main.igz.setupEXNM()
+            }
+            
+            Main.igz.updated = true
+            Main.igz.updateObjects()
+
+            const expanded = Main.tree.nodes()[0].children.map(e => e.expanded())
+            Main.reloadTreeIGZ(false)
+
+            Main.tree.nodes()[0].expand()
+            Main.tree.nodes()[0].children.forEach((e, i) => {
+                if (expanded[i]) e.expand()
+            })
+
+            if (index != null)
+                Main.tree.available().each(e => {
+                    if (e.fixup == node.fixup && e.index == index) {
+                        e.focus()
+                        e.select()
+                        onNodeClick(null, e)
+                    }
+                })
+        }
+
+        elm('#fixup-rename').onclick = () => {
+            elm('#fixup-rename').innerText = 'Renaming...'
+            if (node.fixup == 'TDEP')      Main.igz.updateTDEP(node.index, objectInput.value, fileInput.value)
+            else if (node.fixup == 'TSTR') Main.igz.updateTSTR(node.index, fileInput.value)
+            else if (node.fixup == 'EXNM') Main.igz.updateEXNM(node.index, objectInput.value, fileInput.value)
+            else if (node.fixup == 'EXID') Main.igz.updateEXID(node.index, objectInput.value, fileInput.value)
+
+            setTimeout(() => {
+                updateFixups(node.index, node.fixup == 'TSTR' || node.fixup == 'EXNM')
+                elm('#fixup-rename').innerText = 'Rename'
+            }, 1)
+        }
+
+        elm('#fixup-add').onclick = () => {
+            elm('#fixup-add').innerText = 'Adding...'
+
+            let newIndex
+            if (node.fixup == 'TDEP') newIndex = Main.igz.addTDEP(objectInput.value, fileInput.value)
+            else if (node.fixup == 'TSTR') newIndex = Main.igz.addTSTR(fileInput.value)
+            else if (node.fixup == 'EXNM') newIndex = Main.igz.addEXNM(objectInput.value, fileInput.value, elm('#fixup-isHandle').checked)
+            else if (node.fixup == 'EXID') newIndex = Main.igz.addEXID(objectInput.value, fileInput.value)
+
+            setTimeout(() => {
+                updateFixups(newIndex, node.fixup == 'EXNM')
+                elm('#fixup-add').innerText = 'Add'
+            }, 1)
+        }
+
+        // elm('#fixup-delete').onclick = () => {
+        //     if (showReferences && references.length > 0) 
+        //         return ipcRenderer.send('show-error-message', `Cannot delete ${node.fixup} fixup`, 'This fixup is referenced by other objects.')
+
+        //     if (node.fixup == 'TDEP') Main.igz.removeTDEP(node.index)
+        //     else if (node.fixup == 'TSTR') Main.igz.removeTSTR(node.index)
+        //     else if (node.fixup == 'EXNM') Main.igz.removeEXNM(node.index)
+        //     else if (node.fixup == 'EXID') Main.igz.removeEXID(node.index)
+
+        //     updateFixups(null, node.fixup == 'EXNM')
+        // }
+
+        const div = elm('#fixup-refs')
+        div.innerHTML = ''
+        if (!showReferences) return
+
+        div.innerHTML = `<br><br>References: (${references.length}) `
+
+        references.forEach(({object, field, index}) => {
+            const p = createElm('p', 'object-references', { paddingLeft: '10px' })
+            if (object != null) {
+                // Focus object reference
+                p.innerText = '⇒ ' + object.getName() + ' :: ' + field
+                p.onclick = () => {
+                    Main.objectView = new ObjectView(object)
+                    Main.focusObject(object.index)
+                }
+            }
+            else {
+                // Special case: focus EXNM fixup from TSTR
+                p.innerText = '⇒ ' + field
+                p.onclick = () => {
+                    const exnmRoot = tree.available().find(e => e.type == 'fixup' && e.text.includes('EXNM'))
+                    exnmRoot.expand()
+                    
+                    const node = tree.available().find(e => e.fixup == 'EXNM' && e.type == 'offset' && e.index == index)
+                    node.focus()
+                    node.select()
+                    onNodeClick(null, node)
+                }
+            }
+            div.appendChild(p)
+        })
+    }
+
+    createReferenceList()
 }
 
 /**
@@ -603,11 +826,11 @@ function onNodeLoadChildren(node, resolve, _tree) {
 function searchTree(str, caseSensitive = false) {
     if (str == '') {
         tree.clearSearch()
-        tree.each(e => e.expand())
         return
     }
 
     if (!caseSensitive) str = str.toLowerCase()
+    str = str.trim()
 
     tree.search((e) => {
         // Search in .pak file

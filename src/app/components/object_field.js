@@ -434,9 +434,9 @@ class ObjectField {
         if (inRNEX || inREXT) { 
             const fixup   = inRNEX ? 'RNEX' : 'REXT'
             const index   = this.object.view.readInt(this.offset)
-            const data    = inRNEX ? Main.igz.named_externals : Main.igz.named_handles
+            const data    = inRNEX ? Main.igz.named_externals : Main.igz.fixups.EXID.data
 
-            const mapName = (type) => (name, id) => ({ name: name[0], path: name[1], id, type })
+            const mapName = (type) => (name, id) => ({ name: name[0].toString(), path: name[1].toString(), id, type })
             const names       = data.map(mapName(fixup))
             const short_names = names.map(e => `${e.path.slice(e.path.lastIndexOf('/') + 1)}::${e.name}`)
             const full_names  = names.map(e => `|${e.type}| ${e.path} :: ${e.name}`)

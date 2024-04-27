@@ -32,6 +32,20 @@ const getCacheFolder = (...props) => {
     return join(folder, ...props.map(e => e.toString()))
 }
 
+// Uncompressed textures cache
+const getTextureFolder = (...props) => {
+    const folder = getGameFolder('custom_data', 'textures')
+    if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
+    return join(folder, ...props.map(e => e.toString()))
+}
+
+// Model drawcalls cache
+const getModelFolder = (...props) => {
+    const folder = getGameFolder('custom_data', 'models')
+    if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
+    return join(folder, ...props.map(e => e.toString()))
+}
+
 // Temp files folder
 const getTempFolder = (...props) => {
     const folder = getGameFolder('custom_data', 'tmp')
@@ -47,5 +61,7 @@ export {
     getArchiveFolder,
     getBackupFolder,
     getCacheFolder,
+    getTextureFolder,
+    getModelFolder,
     getTempFolder,
 }

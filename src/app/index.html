@@ -87,7 +87,7 @@
             <!-- Struct Viewer -->
             <div id="data-struct">
                 <div class="section-title">Object structure</div>
-                <pre><code id="data" class="language-json"></code></pre>
+                <pre style="overflow-x: auto;"><code id="data" class="language-json"></code></pre>
             </div>
 
             <!-- Tree Preview -->
@@ -109,6 +109,27 @@
                     </div>
                 </div>
                 <div class="tree tree-preview"></div>
+            </div>
+
+            <!-- Fixup Edit -->
+            <div id="fixup-ctn">
+                <div class="ref-list" id="fixup-infos">
+                    <div id="fixup-title">Title</div>
+                    <div id="fixup-sections">
+                        <div id="fixup-button-container">
+                            <input type="text" id="fixup-file" />
+                            <input type="text" id="fixup-object" />
+                            <button class="tree-preview-btn" id="fixup-rename">Rename</button>
+                            <button class="tree-preview-btn" id="fixup-add">Add New</button>
+                            <button class="tree-preview-btn" id="fixup-delete" style="display: none;">x</button>
+                        </div>
+                        <div id="fixup-checkbox-container">
+                            <label for="fixup-isHandle">Is Handle?</label>
+                            <input type="checkbox" id="fixup-isHandle" />
+                        </div>
+                        <div id="fixup-refs"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Context Menu -->

@@ -63,7 +63,7 @@ function extract_metadata() {
 
         // Add type to hierarchy data
         function addToHierarchy(type, children = null) {
-            if (!hierarchy[type]) hierarchy[type] = { children: new Set() }
+            if (!hierarchy[type]) hierarchy[type] = { children: new Set(), parent }
             if (children) children.forEach(e => hierarchy[type].children.add(e))
         }
         addToHierarchy(typeName)

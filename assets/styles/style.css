@@ -234,17 +234,17 @@ code {
   margin-bottom: 5px;
 }
 
-.hex-offset { color: #888; }
-.hex-child  { color: rgb(111, 173, 255); }
-.hex-mem    { color: rgb(174 209 255); }
-.hex-zero   { color: #666; }
-.hex-vec    { color: rgb(240, 160, 41) }
-.hex-float  { color: #70fff0; }
-.hex-long   { color: #25a6c7; }
-.hex-int    { color: rgb(149, 255, 145) }
+.hex-offset { color: #888    }
+.hex-child  { color: #6fadff }
+.hex-mem    { color: #aed1ff }
+.hex-zero   { color: #666    }
+.hex-vec    { color: #f0a029 }
+.hex-float  { color: #70fff0 }
+.hex-long   { color: #25a6c7 }
+.hex-int    { color: #95ff91 }
 .hex-enum   { color: #daff33 }
-.hex-bool   { color: rgb(158, 74, 242) }
-.hex-string { color: rgb(244, 144, 255) }
+.hex-bool   { color: #9e4af2 }
+.hex-string { color: #f490ff }
 
 .data-table {
   width: 100%;
@@ -369,6 +369,7 @@ td.hex-flash {
   margin: 10px 0;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: .7rem;
 }
 
 .ref-list p {
@@ -490,6 +491,42 @@ td.hex-flash {
   background: #333;
   color: #888;
   cursor: default;
+}
+
+/* Fixup infos (right panel) */
+#fixup-infos {
+  /* display: flex; */
+  display: none;
+  overflow-x: auto;
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+#fixup-button-container {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+#fixup-checkbox-container {
+  display: flex;
+  justify-content: end;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+#fixup-checkbox-container > input {
+  margin: 0;
+  padding: 0;
+}
+
+#fixup-button-container > input {
+  min-width: 35%;
+}
+
+#fixup-ctn {
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Level Explorer */

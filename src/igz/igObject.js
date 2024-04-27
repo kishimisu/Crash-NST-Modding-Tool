@@ -154,11 +154,12 @@ class igObject {
     }
 
     getAllChildrenRecursive(parents = new Set()) {
-        let children = this.children.map(e => e.object)
+        let children = []
 
         for (const child of this.children) {
             if (parents.has(child.object.index)) continue
             parents.add(child.object.index)
+            children.push(child.object)
             children = children.concat(child.object.getAllChildrenRecursive(parents))
         }
 
@@ -183,7 +184,7 @@ class igObject {
                 const [object_name, file_path] = data[handle]
 
                 if (isHandle) {
-                    let path = file_path == extractName(igz.path) ? extractName(newIGZ.path) : file_path
+                    let path = igz.objects.find(e => e.name == object_name) ? extractName(newIGZ.path) : file_path
                     const newIndex = newIGZ.addNamedHandle(object_name, path)
                     parent.view.setInt(newIndex | 0x80000000, offset)
                 }

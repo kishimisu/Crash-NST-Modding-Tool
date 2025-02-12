@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "fs"
 import { bytesToUInt16, computeHash, intToBytes } from "../utils"
 import { decompress } from 'lzma'
 import { getCacheFolder, getTempFolder } from "../app/components/utils/utils"
+import { InflateRaw } from "minizlib"
 
 class FileInfos {
     constructor({ pak, id, offset, ordinal, size, compression, full_path, path, data, original = true, updated = false, include_in_pkg = true }) {
@@ -109,6 +110,13 @@ class FileInfos {
     decompressBlock(offset, decompressedSize, compression, sourceOffset, destination) {
         if (compression == 0) {
             destination.set(this.data.slice(sourceOffset, sourceOffset + decompressedSize), offset)
+        }
+        else if (compression == 1) {
+            const compressedSize = bytesToUInt16(this.data, sourceOffset)
+            const compressed = this.data.slice(sourceOffset + 2, sourceOffset + 2 + compressedSize)
+            const uncompressed = new InflateRaw().end(compressed).read()
+
+            destination.set(uncompressed.subarray(0, decompressedSize), offset)
         }
         else if (compression == 2) {
             const compressedSize = bytesToUInt16(this.data, sourceOffset)

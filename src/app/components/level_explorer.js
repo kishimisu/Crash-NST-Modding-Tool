@@ -156,33 +156,88 @@ class LevelExplorer {
         })
     }
 
-    showTexture(igz) {
-        const igImage = igz.objects.find(e => e.type == 'igImage2')
-        if (!igImage) return console.warn('No igImage2 object found in', igz.path)
+    exportDDS(pixels, width, height, filename) {
+        const header = new ArrayBuffer(128);
+        const headerView = new DataView(header);
 
-        const { pixels, width, height } = igImage.extractTexture(igz)
+        // DDS header
+        headerView.setUint32(0, 0x20534444, true);
+        headerView.setUint32(4, 124, true);
+        headerView.setUint32(8, 0x81007, true);
+        headerView.setUint32(12, height, true);
+        headerView.setUint32(16, width, true);
+        headerView.setUint32(20, width * 4, true);
+        headerView.setUint32(28, 0, true);
+        headerView.setUint32(76, 32, true);
+        headerView.setUint32(80, 0x41, true);
+        headerView.setUint32(84, 0, true);
+        headerView.setUint32(88, 32, true);
+        headerView.setUint32(92, 0x00FF0000, true);
+        headerView.setUint32(96, 0x0000FF00, true);
+        headerView.setUint32(100, 0x000000FF, true);
+        headerView.setUint32(104, 0xFF000000, true);
+        headerView.setUint32(108, 0x1000, true);
+        headerView.setUint32(112, 0, true);
+        headerView.setUint32(116, 0, true);
+        headerView.setUint32(120, 0, true);
 
-        const canvas = elm('#canvas-2d')
-        elm('#explorer').style.display = 'flex'
-        elm('#canvas').style.display = 'none'
-        canvas.width = width
-        canvas.height = height
-        canvas.style.display = 'block'
-        canvas.style.aspectRatio = `${width}/${height}`
+        const flippedPixels = new Uint8Array(pixels.length);
+        const rowSize = width * 4;
 
-        const ctx = canvas.getContext('2d')
-        const imageData = ctx.createImageData(width, height)
-        const image = new ImageData(width, height)
+        for (let y = 0; y < height; y++) {
+           const srcRowStart = (height - 1 - y) * rowSize;
+           const destRowStart = y * rowSize;
     
-        for (let i = 0; i < pixels.length; i++) {
-            imageData.data[i] = pixels[i]
+            for (let x = 0; x < rowSize; x += 4) {
+                flippedPixels[destRowStart + x] = pixels[srcRowStart + x + 2]; // B -> R
+                flippedPixels[destRowStart + x + 1] = pixels[srcRowStart + x + 1]; // G
+                flippedPixels[destRowStart + x + 2] = pixels[srcRowStart + x]; // R -> B
+                flippedPixels[destRowStart + x + 3] = pixels[srcRowStart + x + 3]; // A
+            }
         }
-        
-        ctx.putImageData(imageData, 0, 0)
-        image.data.set(imageData.data)
 
-        canvas.style.transform = 'scale(1, -1)'
-        this.visible = false
+        const ddsData = new Uint8Array(128 + flippedPixels.length);
+        ddsData.set(new Uint8Array(header), 0);
+        ddsData.set(flippedPixels, 128);
+
+        const blob = new Blob([ddsData], { type: 'application/octet-stream' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename + '.dds';
+        link.click();
+    }
+
+    sanitizeFilename(path) {
+        const baseName = path.split('/').pop().split('\\').pop();
+
+        return baseName.replace(/[^a-zA-Z0-9-_\.]/g, '_').replace(/\.\w+$/, '');
+    }
+
+    showTexture(igz) {
+        const igImage = igz.objects.find(e => e.type == 'igImage2');
+        if (!igImage) return console.warn('No igImage2 object found in', igz.path);
+
+        const { pixels, width, height } = igImage.extractTexture(igz);
+
+        const canvas = elm('#canvas-2d');
+        elm('#explorer').style.display = 'flex';
+        elm('#canvas').style.display = 'none';
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.display = 'block';
+        canvas.style.aspectRatio = `${width}/${height}`;
+
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.createImageData(width, height);
+        for (let i = 0; i < pixels.length; i++) {
+            imageData.data[i] = pixels[i];
+        }
+        ctx.putImageData(imageData, 0, 0);
+        canvas.style.transform = 'scale(1, -1)';
+        this.visible = false;
+
+        // export as DDS
+        this.exportDDS(pixels, width, height, this.sanitizeFilename(igz.path));
     }
 
     clearModelScene() {

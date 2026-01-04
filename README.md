@@ -1,8 +1,16 @@
 ## Modding Tool for Crash NST (PC)
 
-This tool lets you explore and edit .pak archives and .igz files for the PC version of Crash NST.
+
+
+# The development has moved to <br> [https://github.com/kishimisu/Crash-NST-Level-Editor](https://github.com/kishimisu/Crash-NST-Level-Editor) !
+
+
+
+---
 
 ![demo](./assets/images/demo3.jpg)
+
+This tool lets you explore and edit .pak archives and .igz files for the PC version of Crash NST.
 
 Some of the features are listed below.
 
